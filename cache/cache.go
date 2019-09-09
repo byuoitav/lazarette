@@ -1,20 +1,21 @@
 package cache
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	// ErrKeyNotFound .
 	ErrKeyNotFound = errors.New("key not found in cache")
+
+	// ErrOutOfDate .
+	ErrOutOfDate = errors.New("a newer value was found; not setting")
 )
 
 // Cache .
 type Cache interface {
-	Get(key string) ([]byte, error)
-	Put(key string, val []byte) error
+	Get(key string) (*Value, error)
+	Set(key string, val *Value) error
 
-	// Subscribe(key string) (chan Value, error)
-}
-
-// Value .
-type Value interface {
+	// Subscribe(prefix string) (chan Value, error)
 }

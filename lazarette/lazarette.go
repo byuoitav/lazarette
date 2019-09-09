@@ -1,6 +1,7 @@
 package lazarette
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -13,6 +14,8 @@ import (
 
 type lazarette struct {
 	store store.Store
+
+	subs map[string][]chan cache.Value
 }
 
 // Open .
@@ -34,25 +37,51 @@ func Open(path string) (cache.Cache, error) {
 
 	c := &lazarette{
 		store: store,
+		subs:  make(map[string][]chan cache.Value),
 	}
 
 	return c, nil
 }
 
 // Get .
-func (l *lazarette) Get(key string) ([]byte, error) {
-	val, err := l.store.Get([]byte(key))
+func (l *lazarette) Get(key string) (*cache.Value, error) {
+	data, err := l.store.Get([]byte(key))
 	switch {
 	case err != nil:
 		return nil, err
-	case val == nil:
+	case data == nil:
 		return nil, cache.ErrKeyNotFound
+	}
+
+	val := &cache.Value{}
+	err = val.UnmarshalBinary(data)
+	if err != nil {
+		return nil, fmt.Errorf("unable to unmarshal val: %v", err)
 	}
 
 	return val, nil
 }
 
-// Put .
-func (l *lazarette) Put(key string, val []byte) error {
-	return l.store.Put([]byte(key), val)
+// Set .
+func (l *lazarette) Set(key string, val *cache.Value) error {
+	if val == nil {
+		return errors.New("value must not be nil")
+	}
+
+	// get the current val
+	cur, err := l.Get(key)
+	if err != nil && !errors.Is(err, cache.ErrKeyNotFound) {
+		return fmt.Errorf("unable to get current value: %v", err)
+	}
+
+	if cur != nil && cur.Timestamp.After(val.Timestamp) {
+		return cache.ErrOutOfDate
+	}
+
+	bytes, err := val.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("unable to marshal new value: %v", err)
+	}
+
+	return l.store.Put([]byte(key), bytes)
 }
