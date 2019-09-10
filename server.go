@@ -28,8 +28,7 @@ func main() {
 			return c.String(http.StatusInternalServerError, err.Error())
 		}
 
-		c.Response().Header().Add("last-update", val.Timestamp.Format(time.RFC3339))
-
+		c.Response().Header().Add("Last-Modified", val.Timestamp.Format(time.RFC1123))
 		return c.Blob(http.StatusOK, "application/json", val.Data)
 	})
 
