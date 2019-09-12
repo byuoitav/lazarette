@@ -31,6 +31,24 @@ func NewStore(db *bolt.DB) (store.Store, error) {
 	return s, nil
 }
 
+func (s *boltstore) Clean() error {
+	return s.Update(func(tx *bolt.Tx) error {
+		err := tx.ForEach(func(name []byte, bucket *bolt.Bucket) error {
+			return tx.DeleteBucket(name)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete old buckets: %v", err)
+		}
+
+		_, err = tx.CreateBucketIfNotExists(DefaultBucket)
+		if err != nil {
+			return fmt.Errorf("failed to create default bucket: %v", err)
+		}
+
+		return nil
+	})
+}
+
 // Get .
 func (s *boltstore) Get(key []byte) ([]byte, error) {
 	var val []byte

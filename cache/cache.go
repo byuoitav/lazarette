@@ -8,14 +8,17 @@ var (
 	// ErrKeyNotFound .
 	ErrKeyNotFound = errors.New("key not found in cache")
 
-	// ErrOutOfDate .
-	ErrOutOfDate = errors.New("a newer value was found; not setting")
+	// ErrNotNew .
+	ErrNotNew = errors.New("a newer value was found; not setting")
 )
 
 // Cache .
 type Cache interface {
-	Get(key string) (*Value, error)
-	Set(key string, val *Value) error
+	Get(key string) (Value, error)
+	Set(key string, val Value) error
 
-	// Subscribe(prefix string) (chan Value, error)
+	Close() error
+	Clean() error
+
+	Subscribe(prefix string) (chan KeyValue, func())
 }
