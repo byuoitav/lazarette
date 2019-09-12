@@ -138,10 +138,10 @@ func (l *lazarette) Set(key string, val cache.Value) error {
 }
 
 // Subscribe .
-func (l *lazarette) Subscribe(prefix string) (ch chan cache.KeyValue, unsubscribe func()) {
-	ch = make(chan cache.KeyValue)
+func (l *lazarette) Subscribe(prefix string) (chan cache.KeyValue, cache.UnsubscribeFunc) {
+	ch := make(chan cache.KeyValue)
 
-	unsubscribe = func() {
+	unsubscribe := func() {
 		l.subsMu.Lock()
 		defer l.subsMu.Unlock()
 

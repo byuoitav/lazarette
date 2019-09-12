@@ -12,6 +12,9 @@ var (
 	ErrNotNew = errors.New("a newer value was found; not setting")
 )
 
+// UnsubscribeFunc .
+type UnsubscribeFunc func()
+
 // Cache .
 type Cache interface {
 	Get(key string) (Value, error)
@@ -20,5 +23,5 @@ type Cache interface {
 	Close() error
 	Clean() error
 
-	Subscribe(prefix string) (chan KeyValue, func())
+	Subscribe(prefix string) (chan KeyValue, UnsubscribeFunc)
 }
