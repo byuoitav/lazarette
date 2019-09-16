@@ -5,9 +5,13 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 
 service Lazarette {
-    rpc Get (Key) returns (Value) {}
-    rpc Set (KeyValue) returns (google.protobuf.Empty) {}
+    rpc Get (Key) returns (Value) {
+        option (google.api.http) = {
+            get: "/api/get/{key}"
+        };
+    }
 
+    rpc Set (KeyValue) returns (google.protobuf.Empty) {}
     rpc Subscribe(Key) returns (stream KeyValue) {}
 }
 

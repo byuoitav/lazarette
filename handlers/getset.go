@@ -1,14 +1,6 @@
 package handlers
 
-import (
-	"io/ioutil"
-	"net/http"
-	"time"
-
-	"github.com/byuoitav/lazarette/cache"
-	"github.com/golang/protobuf/ptypes"
-	"github.com/labstack/echo"
-)
+/*
 
 // GetKey .
 func GetKey(cc cache.Cache) echo.HandlerFunc {
@@ -53,3 +45,4 @@ func SetKey(cc cache.Cache) echo.HandlerFunc {
 		return c.String(http.StatusOK, "updated "+key)
 	}
 }
+*/
