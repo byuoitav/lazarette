@@ -3,6 +3,7 @@ package lazarette
 import (
 	context "context"
 	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -19,32 +20,36 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func startServer(tb testing.TB, address string) *Server {
-	server, err := NewServer(os.TempDir())
+func startServer(tb testing.TB, address string) (*Server, *grpc.Server) {
+	laz, err := NewServer(os.TempDir())
 	if err != nil {
 		tb.Fatalf("failed to start server: %v", err)
 	}
 
-	err = server.Clean()
+	err = laz.Clean()
 	if err != nil {
 		tb.Fatalf("failed to clean server: %v", err)
 	}
 
-	go func() {
-		err = server.StartGRPCServer(address)
-		if err != nil {
-			tb.Fatalf("failed to start grpc server: %v", err)
-		}
-	}()
+	lis, err := net.Listen("tcp", ":7777")
+	if err != nil {
+		tb.Fatalf("failed to listen: %v", err)
+	}
 
-	return server
+	grpcSrv := grpc.NewServer()
+	RegisterLazaretteServer(grpcSrv, laz)
+
+	go grpcSrv.Serve(lis)
+	return laz, grpcSrv
 }
 
-func closeServer(tb testing.TB, s *Server) {
+func closeServer(tb testing.TB, s *Server, grpcSrv *grpc.Server) {
 	err := s.Close()
 	if err != nil {
 		tb.Fatalf("failed to close server: %v", err)
 	}
+
+	grpcSrv.GracefulStop()
 }
 
 func cleanServer(tb testing.TB, s *Server) {
@@ -113,7 +118,7 @@ func setAndCheck(tb testing.TB, client LazaretteClient, kv *KeyValue) {
 }
 
 func TestSetAndGet(t *testing.T) {
-	server := startServer(t, "localhost:7777")
+	server, grpcSrv := startServer(t, "localhost:7777")
 	client := newClient(t, "localhost:7777")
 
 	kv := &KeyValue{
@@ -122,11 +127,11 @@ func TestSetAndGet(t *testing.T) {
 	}
 
 	setAndCheck(t, client, kv)
-	closeServer(t, server)
+	closeServer(t, server, grpcSrv)
 }
 
 func TestSettingTheSameKey(t *testing.T) {
-	server := startServer(t, "localhost:7777")
+	server, grpcSrv := startServer(t, "localhost:7777")
 	client := newClient(t, "localhost:7777")
 
 	kv := &KeyValue{
@@ -139,11 +144,11 @@ func TestSettingTheSameKey(t *testing.T) {
 		kv.Value = randVal(t, 300)
 	}
 
-	closeServer(t, server)
+	closeServer(t, server, grpcSrv)
 }
 
 func TestConcurrentSettingTheSameKey(t *testing.T) {
-	server := startServer(t, "localhost:7777")
+	server, grpcSrv := startServer(t, "localhost:7777")
 
 	kv := &KeyValue{
 		Key:   randKey(t, 50),
@@ -199,11 +204,11 @@ func TestConcurrentSettingTheSameKey(t *testing.T) {
 		wg.Wait()
 	})
 
-	closeServer(t, server)
+	closeServer(t, server, grpcSrv)
 }
 
 func TestConcurrentSettingRandomKeys(t *testing.T) {
-	server := startServer(t, "localhost:7777")
+	server, grpcSrv := startServer(t, "localhost:7777")
 
 	wg := sync.WaitGroup{}
 	test := func(tt *testing.T, n int) {
@@ -258,11 +263,11 @@ func TestConcurrentSettingRandomKeys(t *testing.T) {
 		wg.Wait()
 	})
 
-	closeServer(t, server)
+	closeServer(t, server, grpcSrv)
 }
 
 func BenchmarkSet(b *testing.B) {
-	server := startServer(b, "localhost:7777")
+	server, grpcSrv := startServer(b, "localhost:7777")
 	client := newClient(b, "localhost:7777")
 
 	// generate keys/values
@@ -313,5 +318,5 @@ func BenchmarkSet(b *testing.B) {
 		}
 	})
 
-	closeServer(b, server)
+	closeServer(b, server, grpcSrv)
 }
