@@ -9,6 +9,7 @@ require (
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/gommon v0.3.0
 	github.com/pkg/errors v0.8.1 // indirect
+	github.com/soheilhy/cmux v0.1.4
 	go.etcd.io/bbolt v1.3.3
 	go.uber.org/atomic v1.4.0 // indirect
 	go.uber.org/multierr v1.1.0 // indirect

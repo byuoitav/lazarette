@@ -5,7 +5,6 @@ import (
 	"errors"
 	fmt "fmt"
 	"io"
-	"net"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,8 +31,7 @@ var (
 
 // Server .
 type Server struct {
-	store  store.Store
-	server *grpc.Server
+	store store.Store
 
 	subsMu sync.RWMutex
 	subs   map[string][]chan *KeyValue
@@ -72,23 +70,6 @@ func NewServer(path string, repls ...Replication) (*Server, error) {
 	}
 
 	return s, nil
-}
-
-// StartGRPCServer .
-func (s *Server) StartGRPCServer(address string) error {
-	lis, err := net.Listen("tcp", address)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %v", err)
-	}
-
-	s.server = grpc.NewServer()
-	RegisterLazaretteServer(s.server, s)
-	err = s.server.Serve(lis)
-	if err != nil {
-		return fmt.Errorf("failed to serve: %v", err)
-	}
-
-	return nil
 }
 
 // Get .
@@ -194,10 +175,6 @@ func (s *Server) AddReplication(ctx context.Context, repl Replication) error {
 
 // Close .
 func (s *Server) Close() error {
-	if s.server != nil {
-		s.server.GracefulStop()
-	}
-
 	return s.store.Close()
 }
 
