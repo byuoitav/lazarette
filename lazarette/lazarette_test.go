@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byuoitav/lazarette/log"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	"go.uber.org/zap"
 	grpc "google.golang.org/grpc"
 )
 
@@ -19,6 +21,11 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" + "!@#$%^&*()-_=+;|/\\{}"
 
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func TestMain(m *testing.M) {
+	log.Config.Level.SetLevel(zap.PanicLevel)
+	os.Exit(m.Run())
+}
 
 func startServer(tb testing.TB, address string) (*Server, *grpc.Server) {
 	laz, err := NewServer(os.TempDir())
@@ -274,11 +281,11 @@ func BenchmarkSet(b *testing.B) {
 	var keys []*Key
 	var vals []*Value
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100000; i++ {
 		keys = append(keys, randKey(b, 50))
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100000; i++ {
 		vals = append(vals, randVal(b, 300))
 	}
 

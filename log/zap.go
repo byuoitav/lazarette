@@ -8,11 +8,11 @@ import (
 )
 
 var P *zap.Logger
-var cfg zap.Config
+var Config zap.Config
 
 func init() {
 	var err error
-	cfg := zap.Config{
+	Config = zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.DebugLevel),
 		Development: false,
 		Sampling: &zap.SamplingConfig{
@@ -37,7 +37,7 @@ func init() {
 		ErrorOutputPaths: []string{"stderr"},
 	}
 
-	P, err = cfg.Build()
+	P, err = Config.Build()
 	if err != nil {
 		log.Fatalf("failed to initialize zap logger: %v", err)
 	}

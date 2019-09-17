@@ -5,18 +5,15 @@ import (
 	"errors"
 	fmt "fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/byuoitav/lazarette/log"
 	"github.com/byuoitav/lazarette/store"
-	"github.com/byuoitav/lazarette/store/boltstore"
+	"github.com/byuoitav/lazarette/store/memstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	empty "github.com/golang/protobuf/ptypes/empty"
-	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	grpc "google.golang.org/grpc"
 )
@@ -50,24 +47,31 @@ type UnsubscribeFunc func()
 
 // NewServer .
 func NewServer(path string, repls ...Replication) (*Server, error) {
-	path = filepath.Clean(path)
-	options := &bolt.Options{
-		Timeout: 2 * time.Second,
-	}
+	/*
+		path = filepath.Clean(path)
+		options := &bolt.Options{
+			Timeout: 2 * time.Second,
+		}
 
-	db, err := bolt.Open(path+"/lazarette.bolt", 0666, options)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open bolt: %v", err)
-	}
+		db, err := bolt.Open(path+"/lazarette.bolt", 0666, options)
+		if err != nil {
+			return nil, fmt.Errorf("unable to open bolt: %v", err)
+		}
 
-	store, err := boltstore.NewStore(db)
+		store, err := boltstore.NewStore(db)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create boltstore: %v", err)
+		}
+	*/
+	store, err := memstore.NewStore()
 	if err != nil {
-		return nil, fmt.Errorf("unable to create boltstore: %v", err)
+		return nil, fmt.Errorf("unable to create memstore: %v", err)
 	}
 
 	s := &Server{
 		store: store,
-		subs:  make(map[string][]chan *KeyValue),
+
+		subs: make(map[string][]chan *KeyValue),
 	}
 
 	for _, repl := range repls {
