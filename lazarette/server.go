@@ -10,12 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/byuoitav/lazarette/log"
 	"github.com/byuoitav/lazarette/store"
 	"github.com/byuoitav/lazarette/store/boltstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	empty "github.com/golang/protobuf/ptypes/empty"
 	bolt "go.etcd.io/bbolt"
+	"go.uber.org/zap"
 	grpc "google.golang.org/grpc"
 )
 
@@ -42,6 +44,9 @@ type Replication struct {
 	KeyPrefix  string `json:"key-prefix"`
 	RemoteAddr string `json:"remote-addr"`
 }
+
+// UnsubscribeFunc .
+type UnsubscribeFunc func()
 
 // NewServer .
 func NewServer(path string, repls ...Replication) (*Server, error) {
@@ -78,6 +83,8 @@ func (s *Server) Get(ctx context.Context, key *Key) (*Value, error) {
 		return nil, errors.New("key must not be nil")
 	}
 
+	log.P.Info("Getting", zap.String("key", key.GetKey()))
+
 	data, err := s.store.Get([]byte(key.GetKey()))
 	switch {
 	case err != nil:
@@ -92,6 +99,7 @@ func (s *Server) Get(ctx context.Context, key *Key) (*Value, error) {
 		return nil, fmt.Errorf("unable to unmarshal val: %v", err)
 	}
 
+	log.P.Debug("Successfully got", zap.String("key", key.GetKey()), zap.ByteString("value", val.GetData()))
 	return val, nil
 }
 
@@ -99,6 +107,7 @@ func (s *Server) Get(ctx context.Context, key *Key) (*Value, error) {
 func (s *Server) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 	err := s.set(ctx, kv)
 	if err != nil {
+		log.P.Warn("failed to set", zap.Error(err))
 		return nil, err
 	}
 
@@ -122,19 +131,46 @@ func (s *Server) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error 
 		return errors.New("prefix must not be nil")
 	}
 
-	ch := make(chan *KeyValue)
-	s.subsMu.Lock()
-	s.subs[prefix.GetKey()] = append(s.subs[prefix.GetKey()], ch)
-	s.subsMu.Unlock()
-
+	ch, unsub := s.SubscribeChan(prefix.GetKey())
 	for kv := range ch {
 		err := stream.Send(kv)
 		if err != nil {
-			// TODO print error
+			log.P.Warn("Failed to send to stream", zap.Error(err), zap.String("key", kv.GetKey().GetKey()))
+			unsub()
+			return err
 		}
 	}
 
 	return nil
+}
+
+// SubscribeChan .
+func (s *Server) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
+	ch := make(chan *KeyValue)
+	log.P.Info("Subscribing to", zap.String("prefix", prefix))
+
+	unsubscribe := func() {
+		log.P.Info("Unsubscribing from", zap.String("prefix", prefix))
+		s.subsMu.Lock()
+		defer s.subsMu.Unlock()
+
+		if chs, ok := s.subs[prefix]; ok {
+			s.subs[prefix] = nil
+			for i := range chs {
+				if ch == chs[i] {
+					s.subs[prefix] = append(s.subs[prefix], chs[i])
+				}
+			}
+		}
+
+		close(ch)
+	}
+
+	s.subsMu.Lock()
+	s.subs[prefix] = append(s.subs[prefix], ch)
+	s.subsMu.Unlock()
+
+	return ch, unsubscribe
 }
 
 // AddReplication .
@@ -175,11 +211,13 @@ func (s *Server) AddReplication(ctx context.Context, repl Replication) error {
 
 // Close .
 func (s *Server) Close() error {
+	log.P.Info("Closing lazarette server")
 	return s.store.Close()
 }
 
 // Clean .
 func (s *Server) Clean() error {
+	log.P.Info("Cleaning lazarette server")
 	return s.store.Clean()
 }
 
@@ -195,13 +233,16 @@ func (s *Server) set(ctx context.Context, kv *KeyValue) error {
 		return errors.New("timestamp must not be nil")
 	}
 
+	log.P.Info("Setting", zap.String("key", kv.GetKey().GetKey()), zap.ByteString("value", kv.GetValue().GetData()))
+
 	// get the current val
 	cur, err := s.Get(ctx, kv.GetKey())
 	switch {
-	case err != nil && !errors.Is(err, ErrKeyNotFound):
+	case err != nil && errors.Is(err, ErrKeyNotFound):
+	case err != nil:
 		return fmt.Errorf("unable to get current value: %v", err)
 	case cur == nil:
-		// shouldn't ever happen
+		return fmt.Errorf("weird. current value AND error were nil")
 	}
 
 	if cur.GetTimestamp() != nil {
@@ -230,5 +271,6 @@ func (s *Server) set(ctx context.Context, kv *KeyValue) error {
 		return fmt.Errorf("unable to put value into store: %v", err)
 	}
 
+	log.P.Debug("Successfully set", zap.String("key", kv.GetKey().GetKey()))
 	return nil
 }
