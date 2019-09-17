@@ -63,10 +63,18 @@ func NewServer(path string, repls ...Replication) (*Server, error) {
 			return nil, fmt.Errorf("unable to create boltstore: %v", err)
 		}
 	*/
+
 	store, err := memstore.NewStore()
 	if err != nil {
 		return nil, fmt.Errorf("unable to create memstore: %v", err)
 	}
+
+	/*
+		store, err := syncmapstore.NewStore()
+		if err != nil {
+			return nil, fmt.Errorf("unable to create memstore: %v", err)
+		}
+	*/
 
 	s := &Server{
 		store: store,
