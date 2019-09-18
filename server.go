@@ -6,6 +6,7 @@ import (
 
 	"github.com/byuoitav/lazarette/lazarette"
 	"github.com/byuoitav/lazarette/log"
+	"github.com/byuoitav/lazarette/store/memstore"
 	"github.com/labstack/echo"
 	"github.com/soheilhy/cmux"
 	"go.uber.org/zap"
@@ -18,9 +19,14 @@ func main() {
 		log.P.Fatal("failed to listen", zap.Error(err))
 	}
 
-	laz, err := lazarette.NewServer("/tmp")
+	store, err := memstore.NewStore()
 	if err != nil {
-		log.P.Fatal("failed to create lazarette server", zap.Error(err))
+		log.P.Fatal("failed to create store", zap.Error(err))
+	}
+
+	cache, err := lazarette.NewCache(store)
+	if err != nil {
+		log.P.Fatal("failed to create cache", zap.Error(err))
 	}
 
 	m := cmux.New(lis)
@@ -28,7 +34,7 @@ func main() {
 	httpLis := m.Match(cmux.Any())
 
 	grpcSrv := grpc.NewServer()
-	lazarette.RegisterLazaretteServer(grpcSrv, laz)
+	lazarette.RegisterLazaretteServer(grpcSrv, cache)
 
 	e := echo.New()
 	e.Listener = httpLis
