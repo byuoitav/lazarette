@@ -1,9 +1,0 @@
-# so i don't forget
-PKG := "github.com/${GITHUB_REPOSITORY}"
-PKG_LIST := $(shell go list ${PKG}/...)
-
-.PHONY: all lint
-
-lint:
-	go list ${PKG}/...
-	## golint -set_exit_status ${PKG_LIST}
