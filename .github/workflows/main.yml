@@ -23,8 +23,7 @@ jobs:
 
       - name: Lint go code
         run: |
-          echo $PATH
-          # export PATH=$PATH:$(go env GOPATH)/bin # temp fix
+          export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
           curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.18.0
           golangci-lint run
 
