@@ -2,19 +2,22 @@ package lazarette
 
 import (
 	context "context"
+	"errors"
 	"math/rand"
-	"net"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/byuoitav/lazarette/log"
+	"github.com/byuoitav/lazarette/store"
+	"github.com/byuoitav/lazarette/store/boltstore"
+	"github.com/byuoitav/lazarette/store/memstore"
+	"github.com/byuoitav/lazarette/store/syncmapstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
-	grpc "google.golang.org/grpc"
 )
 
 const charset = "abcdefghijklmnopqrstuvwxyz" +
@@ -22,58 +25,32 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func TestMain(m *testing.M) {
-	log.Config.Level.SetLevel(zap.PanicLevel)
-	os.Exit(m.Run())
+func newCache(tb testing.TB, store store.Store) *Cache {
+	cache, err := NewCache(store)
+	if err != nil {
+		tb.Fatalf("failed to start Cache: %v", err)
+	}
+
+	err = cache.Clean()
+	if err != nil {
+		tb.Fatalf("failed to clean Cache: %v", err)
+	}
+
+	return cache
 }
 
-func startServer(tb testing.TB, address string) (*Server, *grpc.Server) {
-	laz, err := NewServer(os.TempDir())
-	if err != nil {
-		tb.Fatalf("failed to start server: %v", err)
-	}
-
-	err = laz.Clean()
-	if err != nil {
-		tb.Fatalf("failed to clean server: %v", err)
-	}
-
-	lis, err := net.Listen("tcp", ":7777")
-	if err != nil {
-		tb.Fatalf("failed to listen: %v", err)
-	}
-
-	grpcSrv := grpc.NewServer()
-	RegisterLazaretteServer(grpcSrv, laz)
-
-	go grpcSrv.Serve(lis)
-	return laz, grpcSrv
-}
-
-func closeServer(tb testing.TB, s *Server, grpcSrv *grpc.Server) {
+func closeCache(tb testing.TB, s *Cache) {
 	err := s.Close()
 	if err != nil {
-		tb.Fatalf("failed to close server: %v", err)
+		tb.Fatalf("failed to close Cache: %v", err)
 	}
-
-	grpcSrv.GracefulStop()
 }
 
-func cleanServer(tb testing.TB, s *Server) {
+func cleanCache(tb testing.TB, s *Cache) {
 	err := s.Clean()
 	if err != nil {
-		tb.Fatalf("failed to clean server: %v", err)
+		tb.Fatalf("failed to clean Cache: %v", err)
 	}
-}
-
-func newClient(tb testing.TB, address string) LazaretteClient {
-	// conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock())
-	conn, err := grpc.Dial(address, grpc.WithInsecure())
-	if err != nil {
-		tb.Fatalf("failed to connect to server: %v", err)
-	}
-
-	return NewLazaretteClient(conn)
 }
 
 func randKey(tb testing.TB, maxLength int) *Key {
@@ -110,13 +87,13 @@ func checkValueEqual(tb testing.TB, key *Key, expected, actual *Value) {
 	}
 }
 
-func setAndCheck(tb testing.TB, client LazaretteClient, kv *KeyValue) {
-	_, err := client.Set(context.Background(), kv)
+func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
+	_, err := cache.Set(context.Background(), kv)
 	if err != nil {
 		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 	}
 
-	nval, err := client.Get(context.Background(), kv.GetKey())
+	nval, err := cache.Get(context.Background(), kv.GetKey())
 	if err != nil {
 		tb.Fatalf("failed to get %q: %v", kv.GetKey().GetKey(), err)
 	}
@@ -124,206 +101,302 @@ func setAndCheck(tb testing.TB, client LazaretteClient, kv *KeyValue) {
 	checkValueEqual(tb, kv.GetKey(), kv.GetValue(), nval)
 }
 
-func TestSetAndGet(t *testing.T) {
-	server, grpcSrv := startServer(t, "localhost:7777")
-	client := newClient(t, "localhost:7777")
-
-	kv := &KeyValue{
-		Key:   randKey(t, 50),
-		Value: randVal(t, 300),
-	}
-
-	setAndCheck(t, client, kv)
-	closeServer(t, server, grpcSrv)
+func TestMain(m *testing.M) {
+	log.Config.Level.SetLevel(zap.PanicLevel)
+	os.Exit(m.Run())
 }
 
-func TestSettingTheSameKey(t *testing.T) {
-	server, grpcSrv := startServer(t, "localhost:7777")
-	client := newClient(t, "localhost:7777")
+/* TESTS */
 
-	kv := &KeyValue{
-		Key:   randKey(t, 50),
-		Value: randVal(t, 300),
-	}
+func doCacheTest(t *testing.T, cache *Cache) {
+	// testing it works
+	t.Run("TestSetAndGet", SetAndGet(cache))
+	cleanCache(t, cache)
 
-	for i := 0; i < 10; i++ {
-		setAndCheck(t, client, kv)
-		kv.Value = randVal(t, 300)
-	}
+	t.Run("TestSettingTheSameKey", SetAndGet(cache))
+	cleanCache(t, cache)
 
-	closeServer(t, server, grpcSrv)
+	// testing concurrency
+	t.Run("TestConcurrentSettingTheSameKey32Routines/8Times", ConcurrentSettingTheSameKey(cache, 32, 8))
+	cleanCache(t, cache)
+
+	t.Run("TestConcurrentSettingTheSameKey64Routines/16Times", ConcurrentSettingTheSameKey(cache, 64, 16))
+	cleanCache(t, cache)
+
+	t.Run("TestConcurrentSettingTheSameKey128Routines/16Times", ConcurrentSettingTheSameKey(cache, 128, 16))
+	cleanCache(t, cache)
+
+	t.Run("TestConcurrentSettingRandomKeys32Routines/8Times", ConcurrentSettingRandomKeys(cache, 32, 8))
+	cleanCache(t, cache)
+
+	t.Run("TestConcurrentSettingRandomKeys64Routines/16Times", ConcurrentSettingRandomKeys(cache, 64, 16))
+	cleanCache(t, cache)
+
+	t.Run("TestConcurrentSettingRandomKeys128Routines/16Times", ConcurrentSettingRandomKeys(cache, 128, 16))
+	cleanCache(t, cache)
+
+	closeCache(t, cache)
 }
 
-func TestConcurrentSettingTheSameKey(t *testing.T) {
-	server, grpcSrv := startServer(t, "localhost:7777")
-
-	kv := &KeyValue{
-		Key:   randKey(t, 50),
-		Value: randVal(t, 300),
+func TestMemStore(t *testing.T) {
+	store, err := memstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create memstore: %v", err)
 	}
 
-	wg := sync.WaitGroup{}
-	test := func(tt *testing.T, n int) {
-		go func() {
-			defer wg.Done()
-			client := newClient(tt, "localhost:7777")
+	cache, err := NewCache(store)
+	if err != nil {
+		t.Fatalf("failed to start cache: %v", err)
+	}
 
-			for i := 0; i < n; i++ {
-				time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
-				kv.GetValue().Timestamp = ptypes.TimestampNow()
+	doCacheTest(t, cache)
+}
 
-				_, err := client.Set(context.Background(), kv, grpc.WaitForReady(true))
-				if err != nil && !strings.Contains(err.Error(), ErrNotNew.Error()) {
-					tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+func TestSyncMapStore(t *testing.T) {
+	store, err := syncmapstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create syncmap store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		t.Fatalf("failed to start cache: %v", err)
+	}
+
+	doCacheTest(t, cache)
+}
+
+func TestBoltStore(t *testing.T) {
+	options := &bolt.Options{
+		Timeout: 2 * time.Second,
+	}
+
+	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
+	if err != nil {
+		t.Fatalf("failed to open bolt: %v", err)
+	}
+
+	store, err := boltstore.NewStore(db)
+	if err != nil {
+		t.Fatalf("failed to create bolt store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		t.Fatalf("failed to start cache: %v", err)
+	}
+
+	doCacheTest(t, cache)
+}
+
+func SetAndGet(cache *Cache) func(t *testing.T) {
+	return func(t *testing.T) {
+		kv := &KeyValue{
+			Key:   randKey(t, 50),
+			Value: randVal(t, 300),
+		}
+
+		setAndCheck(t, cache, kv)
+	}
+}
+
+func SettingTheSameKey(cache *Cache) func(t *testing.T) {
+	return func(t *testing.T) {
+		kv := &KeyValue{
+			Key:   randKey(t, 50),
+			Value: randVal(t, 300),
+		}
+
+		for i := 0; i < 10; i++ {
+			setAndCheck(t, cache, kv)
+			kv.Value = randVal(t, 300)
+		}
+	}
+}
+
+func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.T) {
+	return func(t *testing.T) {
+		key := randKey(t, 50)
+
+		wg := sync.WaitGroup{}
+		wg.Add(routines)
+
+		for i := 0; i < routines; i++ {
+			go func() {
+				defer wg.Done()
+
+				for i := 0; i < n; i++ {
+					time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
+					kv := &KeyValue{
+						Key:   key,
+						Value: randVal(t, 300),
+					}
+
+					_, err := cache.Set(context.Background(), kv)
+					if err != nil && !errors.Is(err, ErrNotNew) {
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+					}
 				}
-			}
-		}()
+			}()
+		}
+
+		wg.Wait()
 	}
-
-	t.Run("32Routines", func(tt *testing.T) {
-		for i := 0; i < 32; i++ {
-			wg.Add(1)
-			go test(tt, 8)
-		}
-
-		wg.Wait()
-	})
-
-	cleanServer(t, server)
-
-	t.Run("64Routines", func(tt *testing.T) {
-		for i := 0; i < 64; i++ {
-			wg.Add(1)
-			go test(tt, 16)
-		}
-
-		wg.Wait()
-	})
-
-	cleanServer(t, server)
-
-	t.Run("128Routines", func(tt *testing.T) {
-		for i := 0; i < 128; i++ {
-			wg.Add(1)
-			go test(tt, 16)
-		}
-
-		wg.Wait()
-	})
-
-	closeServer(t, server, grpcSrv)
 }
 
-func TestConcurrentSettingRandomKeys(t *testing.T) {
-	server, grpcSrv := startServer(t, "localhost:7777")
+func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.T) {
+	return func(t *testing.T) {
+		wg := sync.WaitGroup{}
+		wg.Add(routines)
 
-	wg := sync.WaitGroup{}
-	test := func(tt *testing.T, n int) {
-		go func() {
-			defer wg.Done()
-			client := newClient(t, "localhost:7777")
+		for i := 0; i < routines; i++ {
+			go func() {
+				defer wg.Done()
 
-			for i := 0; i < n; i++ {
-				time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
+				for i := 0; i < n; i++ {
+					time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
+					kv := &KeyValue{
+						Key:   randKey(t, 50),
+						Value: randVal(t, 300),
+					}
 
-				kv := &KeyValue{
-					Key:   randKey(tt, 50),
-					Value: randVal(tt, 300),
+					_, err := cache.Set(context.Background(), kv)
+					if err != nil && !errors.Is(err, ErrNotNew) {
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+					}
 				}
+			}()
+		}
 
-				_, err := client.Set(context.Background(), kv, grpc.WaitForReady(true))
-				if err != nil && !strings.Contains(err.Error(), ErrNotNew.Error()) {
-					tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
-				}
-			}
-		}()
+		wg.Wait()
 	}
-
-	t.Run("32Routines", func(tt *testing.T) {
-		for i := 0; i < 32; i++ {
-			wg.Add(1)
-			go test(tt, 8)
-		}
-
-		wg.Wait()
-	})
-
-	cleanServer(t, server)
-
-	t.Run("64Routines", func(tt *testing.T) {
-		for i := 0; i < 64; i++ {
-			wg.Add(1)
-			go test(tt, 16)
-		}
-
-		wg.Wait()
-	})
-
-	cleanServer(t, server)
-
-	t.Run("128Routines", func(tt *testing.T) {
-		for i := 0; i < 128; i++ {
-			wg.Add(1)
-			go test(tt, 16)
-		}
-
-		wg.Wait()
-	})
-
-	closeServer(t, server, grpcSrv)
 }
 
-func BenchmarkSet(b *testing.B) {
-	server, grpcSrv := startServer(b, "localhost:7777")
-	client := newClient(b, "localhost:7777")
+/* BENCHMARKS */
 
+func doBenchmarks(b *testing.B, cache *Cache) {
 	// generate keys/values
 	var keys []*Key
 	var vals []*Value
 
-	for i := 0; i < 100000; i++ {
-		keys = append(keys, randKey(b, 50))
+	for i := 0; i < 10000000; i++ {
+		keys = append(keys, randKey(b, 32))
 	}
 
-	for i := 0; i < 100000; i++ {
-		vals = append(vals, randVal(b, 300))
+	for i := 0; i < 10000000; i++ {
+		vals = append(vals, randVal(b, 512))
 	}
 
-	b.Run("UniqueKeys", func(bb *testing.B) {
-		for i := 0; i < bb.N; i++ {
-			val := vals[0]
+	b.Run("BenchmarkUniqueKeys", BUniqueKeys(cache, keys, vals))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkUniqueVals", BUniqueVals(cache, keys, vals))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkUniqueKeysAndVals", BUniqueKeysAndVals(cache, keys, vals))
+	cleanCache(b, cache)
+
+	closeCache(b, cache)
+}
+
+func BenchmarkMemStore(b *testing.B) {
+	store, err := memstore.NewStore()
+	if err != nil {
+		b.Fatalf("failed to create memstore: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		b.Fatalf("failed to start cache: %v", err)
+	}
+
+	doBenchmarks(b, cache)
+}
+
+func BenchmarkSyncMapStore(b *testing.B) {
+	store, err := syncmapstore.NewStore()
+	if err != nil {
+		b.Fatalf("failed to create syncmap store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		b.Fatalf("failed to start cache: %v", err)
+	}
+
+	doBenchmarks(b, cache)
+}
+
+func BenchmarkBoltStore(b *testing.B) {
+	options := &bolt.Options{
+		Timeout: 2 * time.Second,
+	}
+
+	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
+	if err != nil {
+		b.Fatalf("failed to open bolt: %v", err)
+	}
+
+	store, err := boltstore.NewStore(db)
+	if err != nil {
+		b.Fatalf("failed to create bolt store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		b.Fatalf("failed to start cache: %v", err)
+	}
+
+	doBenchmarks(b, cache)
+}
+
+func BUniqueKeys(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B) {
+	return func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			val := vs[0]
 			val.Timestamp = ptypes.TimestampNow()
 
-			setAndCheck(bb, client, &KeyValue{
-				Key:   keys[i],
+			_, err := cache.Set(context.Background(), &KeyValue{
+				Key:   ks[i],
 				Value: val,
 			})
+			if err != nil {
+				b.Fatalf("failed to set: %v", err)
+			}
 		}
-	})
+	}
+}
 
-	b.Run("UniqueVals", func(bb *testing.B) {
-		for i := 0; i < bb.N; i++ {
-			val := vals[i]
+func BUniqueVals(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B) {
+	return func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			val := vs[i]
 			val.Timestamp = ptypes.TimestampNow()
 
-			setAndCheck(bb, client, &KeyValue{
-				Key:   keys[0],
+			_, err := cache.Set(context.Background(), &KeyValue{
+				Key:   ks[0],
 				Value: val,
 			})
+			if err != nil {
+				b.Fatalf("failed to set: %v", err)
+			}
 		}
-	})
+	}
+}
 
-	b.Run("UniqueKeysAndVals", func(bb *testing.B) {
-		for i := 0; i < bb.N; i++ {
-			val := vals[i]
+func BUniqueKeysAndVals(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B) {
+	return func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			val := vs[i]
 			val.Timestamp = ptypes.TimestampNow()
 
-			setAndCheck(bb, client, &KeyValue{
-				Key:   keys[i],
+			_, err := cache.Set(context.Background(), &KeyValue{
+				Key:   ks[i],
 				Value: val,
 			})
+			if err != nil {
+				b.Fatalf("failed to set: %v", err)
+			}
 		}
-	})
-
-	closeServer(b, server, grpcSrv)
+	}
 }

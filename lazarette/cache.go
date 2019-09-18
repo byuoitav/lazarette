@@ -10,7 +10,6 @@ import (
 
 	"github.com/byuoitav/lazarette/log"
 	"github.com/byuoitav/lazarette/store"
-	"github.com/byuoitav/lazarette/store/memstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	empty "github.com/golang/protobuf/ptypes/empty"
@@ -28,8 +27,8 @@ var (
 	ErrNotNew = errors.New("a newer value was found; not setting")
 )
 
-// Server .
-type Server struct {
+// Cache .
+type Cache struct {
 	store store.Store
 
 	subsMu sync.RWMutex
@@ -45,44 +44,15 @@ type Replication struct {
 // UnsubscribeFunc .
 type UnsubscribeFunc func()
 
-// NewServer .
-func NewServer(path string, repls ...Replication) (*Server, error) {
-	/*
-		path = filepath.Clean(path)
-		options := &bolt.Options{
-			Timeout: 2 * time.Second,
-		}
-
-		db, err := bolt.Open(path+"/lazarette.bolt", 0666, options)
-		if err != nil {
-			return nil, fmt.Errorf("unable to open bolt: %v", err)
-		}
-
-		store, err := boltstore.NewStore(db)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create boltstore: %v", err)
-		}
-	*/
-
-	store, err := memstore.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("unable to create memstore: %v", err)
-	}
-
-	/*
-		store, err := syncmapstore.NewStore()
-		if err != nil {
-			return nil, fmt.Errorf("unable to create memstore: %v", err)
-		}
-	*/
-
-	s := &Server{
+// NewCache .
+func NewCache(store store.Store, repls ...Replication) (*Cache, error) {
+	s := &Cache{
 		store: store,
-
-		subs: make(map[string][]chan *KeyValue),
+		subs:  make(map[string][]chan *KeyValue),
 	}
 
 	for _, repl := range repls {
+		// TODO check error here
 		s.AddReplication(context.TODO(), repl)
 	}
 
@@ -90,7 +60,7 @@ func NewServer(path string, repls ...Replication) (*Server, error) {
 }
 
 // Get .
-func (s *Server) Get(ctx context.Context, key *Key) (*Value, error) {
+func (s *Cache) Get(ctx context.Context, key *Key) (*Value, error) {
 	if key == nil {
 		return nil, errors.New("key must not be nil")
 	}
@@ -116,7 +86,7 @@ func (s *Server) Get(ctx context.Context, key *Key) (*Value, error) {
 }
 
 // Set .
-func (s *Server) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
+func (s *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 	err := s.set(ctx, kv)
 	if err != nil {
 		log.P.Warn("failed to set", zap.Error(err))
@@ -138,7 +108,7 @@ func (s *Server) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 }
 
 // Subscribe .
-func (s *Server) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
+func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	if prefix == nil {
 		return errors.New("prefix must not be nil")
 	}
@@ -157,7 +127,7 @@ func (s *Server) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error 
 }
 
 // SubscribeChan .
-func (s *Server) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
+func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	ch := make(chan *KeyValue)
 	log.P.Info("Subscribing to", zap.String("prefix", prefix))
 
@@ -186,7 +156,8 @@ func (s *Server) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) 
 }
 
 // AddReplication .
-func (s *Server) AddReplication(ctx context.Context, repl Replication) error {
+func (s *Cache) AddReplication(ctx context.Context, repl Replication) error {
+	// TODO make the connection retry if it disconnects
 	conn, err := grpc.Dial(repl.RemoteAddr)
 	if err != nil {
 		return fmt.Errorf("unable to open connection: %v", err)
@@ -214,26 +185,30 @@ func (s *Server) AddReplication(ctx context.Context, repl Replication) error {
 			return fmt.Errorf("unable to recv message from stream: %v", err)
 		}
 
+		if kv.GetKey() != nil {
+			log.P.Info("Received value", zap.String("from", repl.RemoteAddr), zap.String("key", kv.GetKey().GetKey()))
+		}
+
 		err = s.set(ctx, kv)
 		if err != nil && !errors.Is(err, ErrNotNew) {
-			// log something?
+			log.P.Warn("unable to set key", zap.String("from", repl.RemoteAddr), zap.Error(err))
 		}
 	}
 }
 
 // Close .
-func (s *Server) Close() error {
-	log.P.Info("Closing lazarette server")
+func (s *Cache) Close() error {
+	log.P.Info("Closing lazarette Cache")
 	return s.store.Close()
 }
 
 // Clean .
-func (s *Server) Clean() error {
-	log.P.Info("Cleaning lazarette server")
+func (s *Cache) Clean() error {
+	log.P.Info("Cleaning lazarette Cache")
 	return s.store.Clean()
 }
 
-func (s *Server) set(ctx context.Context, kv *KeyValue) error {
+func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 	switch {
 	case kv == nil:
 		return errors.New("kv must not be nil")
@@ -250,7 +225,7 @@ func (s *Server) set(ctx context.Context, kv *KeyValue) error {
 	// get the current val
 	cur, err := s.Get(ctx, kv.GetKey())
 	switch {
-	case err != nil && errors.Is(err, ErrKeyNotFound):
+	case errors.Is(err, ErrKeyNotFound):
 	case err != nil:
 		return fmt.Errorf("unable to get current value: %v", err)
 	case cur == nil:
