@@ -14,10 +14,13 @@ build: deps
 	@go build -i -o dist/${NAME} ${PKG}
 
 test:
-	go test -v ${PKG_LIST}
+	@go test -v ${PKG_LIST}
 
 test-cov:
-	go test -coverprofile coverage.txt ${PKG_LIST}
+	@go test -coverprofile coverage.txt ${PKG_LIST}
 
 clean:
 	@rm -f dist/
+
+lint:
+	@golangci-lint run --tests=false
