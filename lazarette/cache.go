@@ -52,8 +52,11 @@ func NewCache(store store.Store, repls ...Replication) (*Cache, error) {
 	}
 
 	for _, repl := range repls {
-		// TODO check error here
-		s.AddReplication(context.TODO(), repl)
+		// TODO error codes for each replication?
+		err := s.AddReplication(context.TODO(), repl)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return s, nil

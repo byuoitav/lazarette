@@ -7,7 +7,10 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// P is a plain zap logger
 var P *zap.Logger
+
+// Config is the logger config used for P
 var Config zap.Config
 
 func init() {
@@ -44,5 +47,5 @@ func init() {
 
 	P.Info("Zap logger started")
 
-	defer P.Sync()
+	_ = P.Sync()
 }

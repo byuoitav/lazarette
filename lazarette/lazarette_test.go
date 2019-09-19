@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/byuoitav/lazarette/log"
-	"github.com/byuoitav/lazarette/store"
 	"github.com/byuoitav/lazarette/store/boltstore"
 	"github.com/byuoitav/lazarette/store/memstore"
 	"github.com/byuoitav/lazarette/store/syncmapstore"
@@ -25,15 +24,67 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func newCache(tb testing.TB, store store.Store) *Cache {
+func newMemCache(tb testing.TB) *Cache {
+	store, err := memstore.NewStore()
+	if err != nil {
+		tb.Fatalf("failed to create memstore: %v", err)
+	}
+
 	cache, err := NewCache(store)
 	if err != nil {
-		tb.Fatalf("failed to start Cache: %v", err)
+		tb.Fatalf("failed to start cache: %v", err)
 	}
 
 	err = cache.Clean()
 	if err != nil {
-		tb.Fatalf("failed to clean Cache: %v", err)
+		tb.Fatalf("failed to clean cache: %s", err)
+	}
+
+	return cache
+}
+
+func newSyncMapCache(tb testing.TB) *Cache {
+	store, err := syncmapstore.NewStore()
+	if err != nil {
+		tb.Fatalf("failed to create syncmap store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		tb.Fatalf("failed to start cache: %v", err)
+	}
+
+	err = cache.Clean()
+	if err != nil {
+		tb.Fatalf("failed to clean cache: %s", err)
+	}
+
+	return cache
+}
+
+func newBoltCache(tb testing.TB) *Cache {
+	options := &bolt.Options{
+		Timeout: 2 * time.Second,
+	}
+
+	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
+	if err != nil {
+		tb.Fatalf("failed to open bolt: %v", err)
+	}
+
+	store, err := boltstore.NewStore(db)
+	if err != nil {
+		tb.Fatalf("failed to create bolt store: %v", err)
+	}
+
+	cache, err := NewCache(store)
+	if err != nil {
+		tb.Fatalf("failed to start cache: %v", err)
+	}
+
+	err = cache.Clean()
+	if err != nil {
+		tb.Fatalf("failed to clean cache: %s", err)
 	}
 
 	return cache
@@ -113,7 +164,7 @@ func doCacheTest(t *testing.T, cache *Cache) {
 	t.Run("TestSetAndGet", SetAndGet(cache))
 	cleanCache(t, cache)
 
-	t.Run("TestSettingTheSameKey", SetAndGet(cache))
+	t.Run("TestSettingTheSameKey", SettingTheSameKey(cache))
 	cleanCache(t, cache)
 
 	// testing concurrency
@@ -139,54 +190,15 @@ func doCacheTest(t *testing.T, cache *Cache) {
 }
 
 func TestMemStore(t *testing.T) {
-	store, err := memstore.NewStore()
-	if err != nil {
-		t.Fatalf("failed to create memstore: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		t.Fatalf("failed to start cache: %v", err)
-	}
-
-	doCacheTest(t, cache)
+	doCacheTest(t, newMemCache(t))
 }
 
 func TestSyncMapStore(t *testing.T) {
-	store, err := syncmapstore.NewStore()
-	if err != nil {
-		t.Fatalf("failed to create syncmap store: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		t.Fatalf("failed to start cache: %v", err)
-	}
-
-	doCacheTest(t, cache)
+	doCacheTest(t, newSyncMapCache(t))
 }
 
 func TestBoltStore(t *testing.T) {
-	options := &bolt.Options{
-		Timeout: 2 * time.Second,
-	}
-
-	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
-	if err != nil {
-		t.Fatalf("failed to open bolt: %v", err)
-	}
-
-	store, err := boltstore.NewStore(db)
-	if err != nil {
-		t.Fatalf("failed to create bolt store: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		t.Fatalf("failed to start cache: %v", err)
-	}
-
-	doCacheTest(t, cache)
+	doCacheTest(t, newBoltCache(t))
 }
 
 func SetAndGet(cache *Cache) func(t *testing.T) {
@@ -222,7 +234,7 @@ func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.
 		wg.Add(routines)
 
 		for i := 0; i < routines; i++ {
-			go func() {
+			go func(tt *testing.T) {
 				defer wg.Done()
 
 				for i := 0; i < n; i++ {
@@ -234,10 +246,10 @@ func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 					}
 				}
-			}()
+			}(t)
 		}
 
 		wg.Wait()
@@ -250,7 +262,7 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 		wg.Add(routines)
 
 		for i := 0; i < routines; i++ {
-			go func() {
+			go func(tt *testing.T) {
 				defer wg.Done()
 
 				for i := 0; i < n; i++ {
@@ -262,10 +274,10 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 					}
 				}
-			}()
+			}(t)
 		}
 
 		wg.Wait()
@@ -300,54 +312,15 @@ func doBenchmarks(b *testing.B, cache *Cache) {
 }
 
 func BenchmarkMemStore(b *testing.B) {
-	store, err := memstore.NewStore()
-	if err != nil {
-		b.Fatalf("failed to create memstore: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		b.Fatalf("failed to start cache: %v", err)
-	}
-
-	doBenchmarks(b, cache)
+	doBenchmarks(b, newMemCache(b))
 }
 
 func BenchmarkSyncMapStore(b *testing.B) {
-	store, err := syncmapstore.NewStore()
-	if err != nil {
-		b.Fatalf("failed to create syncmap store: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		b.Fatalf("failed to start cache: %v", err)
-	}
-
-	doBenchmarks(b, cache)
+	doBenchmarks(b, newSyncMapCache(b))
 }
 
 func BenchmarkBoltStore(b *testing.B) {
-	options := &bolt.Options{
-		Timeout: 2 * time.Second,
-	}
-
-	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
-	if err != nil {
-		b.Fatalf("failed to open bolt: %v", err)
-	}
-
-	store, err := boltstore.NewStore(db)
-	if err != nil {
-		b.Fatalf("failed to create bolt store: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		b.Fatalf("failed to start cache: %v", err)
-	}
-
-	doBenchmarks(b, cache)
+	doBenchmarks(b, newBoltCache(b))
 }
 
 func BUniqueKeys(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B) {
