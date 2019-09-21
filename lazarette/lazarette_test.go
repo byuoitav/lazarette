@@ -233,8 +233,8 @@ func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.
 		wg := sync.WaitGroup{}
 		wg.Add(routines)
 
-		for i := 0; i < routines; i++ {
-			go func(tt *testing.T) {
+		for r := 0; r < routines; r++ {
+			go func() {
 				defer wg.Done()
 
 				for i := 0; i < n; i++ {
@@ -246,10 +246,10 @@ func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 					}
 				}
-			}(t)
+			}()
 		}
 
 		wg.Wait()
@@ -261,8 +261,8 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 		wg := sync.WaitGroup{}
 		wg.Add(routines)
 
-		for i := 0; i < routines; i++ {
-			go func(tt *testing.T) {
+		for r := 0; r < routines; r++ {
+			go func() {
 				defer wg.Done()
 
 				for i := 0; i < n; i++ {
@@ -274,10 +274,10 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						tt.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 					}
 				}
-			}(t)
+			}()
 		}
 
 		wg.Wait()
@@ -298,7 +298,6 @@ func doBenchmarks(b *testing.B, cache *Cache) {
 	for i := 0; i < 10000000; i++ {
 		vals = append(vals, randVal(b, 512))
 	}
-
 	b.Run("BenchmarkUniqueKeys", BUniqueKeys(cache, keys, vals))
 	cleanCache(b, cache)
 
@@ -306,6 +305,33 @@ func doBenchmarks(b *testing.B, cache *Cache) {
 	cleanCache(b, cache)
 
 	b.Run("BenchmarkUniqueKeysAndVals", BUniqueKeysAndVals(cache, keys, vals))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeys16Routines", BConcurrentUniqueKeys(cache, keys, vals, 16))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeys32Routines", BConcurrentUniqueKeys(cache, keys, vals, 32))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeys64Routines", BConcurrentUniqueKeys(cache, keys, vals, 64))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueVals16Routines", BConcurrentUniqueVals(cache, keys, vals, 16))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueVals32Routines", BConcurrentUniqueVals(cache, keys, vals, 32))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueVals64Routines", BConcurrentUniqueVals(cache, keys, vals, 64))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeysAndVals16Routines", BConcurrentUniqueKeysAndVals(cache, keys, vals, 16))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeysAndVals32Routines", BConcurrentUniqueKeysAndVals(cache, keys, vals, 32))
+	cleanCache(b, cache)
+
+	b.Run("BenchmarkConcurrentUniqueKeysAndVals64Routines", BConcurrentUniqueKeysAndVals(cache, keys, vals, 64))
 	cleanCache(b, cache)
 
 	closeCache(b, cache)
@@ -371,5 +397,89 @@ func BUniqueKeysAndVals(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B)
 				b.Fatalf("failed to set: %v", err)
 			}
 		}
+	}
+}
+
+func BConcurrentUniqueKeys(cache *Cache, ks []*Key, vs []*Value, routines int) func(b *testing.B) {
+	return func(b *testing.B) {
+		wg := sync.WaitGroup{}
+		wg.Add(routines)
+
+		for r := 0; r < routines; r++ {
+			go func() {
+				defer wg.Done()
+
+				for i := 0; i < b.N; i++ {
+					val := vs[0]
+					val.Timestamp = ptypes.TimestampNow()
+
+					_, err := cache.Set(context.Background(), &KeyValue{
+						Key:   ks[i],
+						Value: val,
+					})
+					if err != nil && !errors.Is(err, ErrNotNew) {
+						b.Fatalf("failed to set: %v", err)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+	}
+}
+
+func BConcurrentUniqueVals(cache *Cache, ks []*Key, vs []*Value, routines int) func(b *testing.B) {
+	return func(b *testing.B) {
+		wg := sync.WaitGroup{}
+		wg.Add(routines)
+
+		for r := 0; r < routines; r++ {
+			go func() {
+				defer wg.Done()
+
+				for i := 0; i < b.N; i++ {
+					val := vs[i]
+					val.Timestamp = ptypes.TimestampNow()
+
+					_, err := cache.Set(context.Background(), &KeyValue{
+						Key:   ks[0],
+						Value: val,
+					})
+					if err != nil && !errors.Is(err, ErrNotNew) {
+						b.Fatalf("failed to set: %v", err)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+	}
+}
+
+func BConcurrentUniqueKeysAndVals(cache *Cache, ks []*Key, vs []*Value, routines int) func(b *testing.B) {
+	return func(b *testing.B) {
+		wg := sync.WaitGroup{}
+		wg.Add(routines)
+
+		for r := 0; r < routines; r++ {
+			go func() {
+				defer wg.Done()
+
+				for i := 0; i < b.N; i++ {
+					val := vs[i]
+					val.Timestamp = ptypes.TimestampNow()
+
+					_, err := cache.Set(context.Background(), &KeyValue{
+						Key:   ks[i],
+						Value: val,
+					})
+					if err != nil && !errors.Is(err, ErrNotNew) {
+						b.Fatalf("failed to set: %v", err)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
 	}
 }

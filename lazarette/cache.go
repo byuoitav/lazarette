@@ -53,7 +53,7 @@ func NewCache(store store.Store, repls ...Replication) (*Cache, error) {
 
 	for _, repl := range repls {
 		// TODO error codes for each replication?
-		err := s.AddReplication(context.TODO(), repl)
+		err := s.ReplicateFrom(context.TODO(), repl)
 		if err != nil {
 			return nil, err
 		}
@@ -158,8 +158,8 @@ func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	return ch, unsubscribe
 }
 
-// AddReplication .
-func (s *Cache) AddReplication(ctx context.Context, repl Replication) error {
+// ReplicateFrom .
+func (s *Cache) ReplicateFrom(ctx context.Context, repl Replication) error {
 	// TODO make the connection retry if it disconnects
 	conn, err := grpc.Dial(repl.RemoteAddr)
 	if err != nil {

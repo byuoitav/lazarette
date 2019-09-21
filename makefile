@@ -8,6 +8,7 @@ PKG_LIST := $(shell go list ${PKG}/...)
 all: build
 
 deps:
+	@go generate ./...
 	@go mod download
 
 build: deps
