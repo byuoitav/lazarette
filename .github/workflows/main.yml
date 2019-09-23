@@ -63,8 +63,8 @@ jobs:
 
       - name: Build
         run: |
-          PROTOBUF_VERSION=v3.9.1
-          PROTOC_FILENAME=protoc-${PROTOBUF_VERSION}-linux-aarch_64.zip
+          export PROTOBUF_VERSION=v3.9.1
+          export PROTOC_FILENAME=protoc-${PROTOBUF_VERSION}-linux-aarch_64.zip
           curl -o ${PROTOC_FILENAME} -sfL https://github.com/google/protobuf/releases/download/${PROTOBUF_VERSION}/${PROTOC_FILENAME}
           unzip ${PROTOC_FILENAME}
           mv ${PROTOC_FILENAME}/bin/protoc /bin/protoc
