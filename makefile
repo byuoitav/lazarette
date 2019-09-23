@@ -7,7 +7,9 @@ PKG_LIST := $(shell go list ${PKG}/...)
 
 all: build
 
+# must have protoc installed
 deps:
+	@go get -u github.com/golang/protobuf/protoc-gen-go
 	@go generate ./...
 	@go mod download
 
