@@ -67,6 +67,6 @@ jobs:
           export PROTOC_FILENAME=protoc-${PROTOBUF_VERSION}-linux-aarch_64
           curl -o ${PROTOC_FILENAME}.zip -sfL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_FILENAME}.zip"
           unzip ${PROTOC_FILENAME}.zip
-          mv bin/protoc $(go env GOAPTH)/bin/protoc
+          mv bin/protoc $(go env GOPATH)/bin/protoc
           export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
           make
