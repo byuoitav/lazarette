@@ -69,6 +69,7 @@ jobs:
           unzip ${PROTOC_FILENAME}.zip
           ls -la bin/
           ls -la $(go env GOPATH)
+          echo "path: $PATH"
           mv bin/protoc $(go env GOPATH)/bin/
           export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
           make
