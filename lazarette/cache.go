@@ -131,7 +131,7 @@ func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 
 // SubscribeChan .
 func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
-	ch := make(chan *KeyValue)
+	ch := make(chan *KeyValue, 16)
 	log.P.Info("Subscribing to", zap.String("prefix", prefix))
 
 	unsubscribe := func() {
@@ -142,7 +142,7 @@ func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 		if chs, ok := s.subs[prefix]; ok {
 			s.subs[prefix] = nil
 			for i := range chs {
-				if ch == chs[i] {
+				if ch != chs[i] {
 					s.subs[prefix] = append(s.subs[prefix], chs[i])
 				}
 			}

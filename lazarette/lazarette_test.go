@@ -25,6 +25,8 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func newMemCache(tb testing.TB) *Cache {
+	tb.Helper()
+
 	store, err := memstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create memstore: %v", err)
@@ -44,6 +46,8 @@ func newMemCache(tb testing.TB) *Cache {
 }
 
 func newSyncMapCache(tb testing.TB) *Cache {
+	tb.Helper()
+
 	store, err := syncmapstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create syncmap store: %v", err)
@@ -63,6 +67,8 @@ func newSyncMapCache(tb testing.TB) *Cache {
 }
 
 func newBoltCache(tb testing.TB) *Cache {
+	tb.Helper()
+
 	options := &bolt.Options{
 		Timeout: 2 * time.Second,
 	}
@@ -91,6 +97,8 @@ func newBoltCache(tb testing.TB) *Cache {
 }
 
 func closeCache(tb testing.TB, s *Cache) {
+	tb.Helper()
+
 	err := s.Close()
 	if err != nil {
 		tb.Fatalf("failed to close Cache: %v", err)
@@ -98,6 +106,8 @@ func closeCache(tb testing.TB, s *Cache) {
 }
 
 func cleanCache(tb testing.TB, s *Cache) {
+	tb.Helper()
+
 	err := s.Clean()
 	if err != nil {
 		tb.Fatalf("failed to clean Cache: %v", err)
@@ -105,6 +115,8 @@ func cleanCache(tb testing.TB, s *Cache) {
 }
 
 func randKey(tb testing.TB, maxLength int) *Key {
+	tb.Helper()
+
 	for {
 		b := make([]byte, seededRand.Intn(maxLength))
 		for i := range b {
@@ -120,6 +132,8 @@ func randKey(tb testing.TB, maxLength int) *Key {
 }
 
 func randVal(tb testing.TB, maxLength int) *Value {
+	tb.Helper()
+
 	buf := make([]byte, seededRand.Intn(maxLength))
 	_, err := seededRand.Read(buf)
 	if err != nil {
@@ -133,12 +147,16 @@ func randVal(tb testing.TB, maxLength int) *Value {
 }
 
 func checkValueEqual(tb testing.TB, key *Key, expected, actual *Value) {
+	tb.Helper()
+
 	if !proto.Equal(expected, actual) {
 		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key.GetKey(), expected.String(), actual.String())
 	}
 }
 
 func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
+	tb.Helper()
+
 	_, err := cache.Set(context.Background(), kv)
 	if err != nil {
 		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
@@ -160,6 +178,8 @@ func TestMain(m *testing.M) {
 /* TESTS */
 
 func doCacheTest(t *testing.T, cache *Cache) {
+	t.Helper()
+
 	// testing it works
 	t.Run("TestSetAndGet", SetAndGet(cache))
 	cleanCache(t, cache)
@@ -184,6 +204,15 @@ func doCacheTest(t *testing.T, cache *Cache) {
 	cleanCache(t, cache)
 
 	t.Run("TestConcurrentSettingRandomKeys128Routines/16Times", ConcurrentSettingRandomKeys(cache, 128, 16))
+	cleanCache(t, cache)
+
+	t.Run("TestSubscriptionChanMatch", SubscriptionChanMatchTest(cache))
+	cleanCache(t, cache)
+
+	t.Run("TestSubscriptionChanNoMatch", SubscriptionChanNoMatchTest(cache))
+	cleanCache(t, cache)
+
+	t.Run("TestUnsubscribe", UnsubscribeTest(cache))
 	cleanCache(t, cache)
 
 	closeCache(t, cache)
@@ -281,6 +310,86 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 		}
 
 		wg.Wait()
+	}
+}
+
+func SubscriptionChanMatchTest(cache *Cache) func(t *testing.T) {
+	return func(t *testing.T) {
+		ch, unsub := cache.SubscribeChan("ITB")
+		defer unsub()
+
+		kv := &KeyValue{
+			Key: &Key{
+				Key: "ITB-1101-CP1",
+			},
+			Value: &Value{
+				Timestamp: ptypes.TimestampNow(),
+				Data:      []byte(`{"test": "value"}`),
+			},
+		}
+
+		_, err := cache.Set(context.Background(), kv)
+		if err != nil {
+			t.Fatalf("unable to set key: %s", err)
+		}
+
+		if len(ch) != 1 {
+			t.Fatalf("channel didn't get new value")
+		}
+
+		checkValueEqual(t, kv.GetKey(), kv.GetValue(), (<-ch).GetValue())
+	}
+}
+
+func SubscriptionChanNoMatchTest(cache *Cache) func(*testing.T) {
+	return func(t *testing.T) {
+		kv := &KeyValue{
+			Key: &Key{
+				Key: "ITC-1101-CP1", // prefix doesn't match
+			},
+			Value: &Value{
+				Timestamp: ptypes.TimestampNow(),
+				Data:      []byte(`{"test": "value"}`),
+			},
+		}
+
+		ch, unsub := cache.SubscribeChan("ITB")
+		defer unsub()
+
+		_, err := cache.Set(context.Background(), kv)
+		if err != nil {
+			t.Fatalf("unable to set key: %s", err)
+		}
+
+		if len(ch) > 0 {
+			t.Fatalf("channel received value when prefix didn't match")
+		}
+	}
+}
+
+func UnsubscribeTest(cache *Cache) func(*testing.T) {
+	return func(t *testing.T) {
+		kv := &KeyValue{
+			Key: &Key{
+				Key: "ITB-1101-CP1",
+			},
+			Value: &Value{
+				Timestamp: ptypes.TimestampNow(),
+				Data:      []byte(`{"test": "value"}`),
+			},
+		}
+
+		ch, unsub := cache.SubscribeChan("ITB")
+		unsub()
+
+		_, err := cache.Set(context.Background(), kv)
+		if err != nil {
+			t.Fatalf("unable to set key: %s", err)
+		}
+
+		if len(ch) > 0 {
+			t.Fatalf("channel got a new value after unsubscribe")
+		}
 	}
 }
 

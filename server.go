@@ -2,7 +2,6 @@ package main
 
 import (
 	"net"
-	"net/http"
 
 	"github.com/byuoitav/lazarette/lazarette"
 	"github.com/byuoitav/lazarette/log"
@@ -39,12 +38,21 @@ func main() {
 	e := echo.New()
 	e.Listener = httpLis
 
-	e.GET("/hello", func(c echo.Context) error {
-		return c.HTML(http.StatusOK, "<html><script>window.onload = alert('hello!')</script></html>")
-	})
+	// start grpc server
+	go func() {
+		err = grpcSrv.Serve(grpcLis)
+		if err != nil {
+			log.P.Fatal("failed to start grpc server", zap.Error(err))
+		}
+	}()
 
-	go grpcSrv.Serve(grpcLis)
-	go e.Start("")
+	// start echo server
+	go func() {
+		err = e.Start("")
+		if err != nil {
+			log.P.Fatal("failed to start grpc server", zap.Error(err))
+		}
+	}()
 
 	log.P.Info("Started server", zap.String("address", lis.Addr().String()))
 	err = m.Serve()
