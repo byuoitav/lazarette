@@ -1,11 +1,11 @@
-package memstore
+package syncmapstore
 
 import (
 	"bytes"
 	"testing"
 )
 
-func newStore(tb testing.TB) *memstore {
+func newStore(tb testing.TB) *syncmapstore {
 	tb.Helper()
 
 	store, err := NewStore()
@@ -18,7 +18,7 @@ func newStore(tb testing.TB) *memstore {
 		tb.Fatalf("failed to clean memstore: %v", err)
 	}
 
-	return store.(*memstore)
+	return store.(*syncmapstore)
 }
 
 func testEqual(tb testing.TB, expected, actual []byte) {
