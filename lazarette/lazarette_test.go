@@ -25,8 +25,6 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func newMemCache(tb testing.TB) *Cache {
-	tb.Helper()
-
 	store, err := memstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create memstore: %v", err)
@@ -46,8 +44,6 @@ func newMemCache(tb testing.TB) *Cache {
 }
 
 func newSyncMapCache(tb testing.TB) *Cache {
-	tb.Helper()
-
 	store, err := syncmapstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create syncmap store: %v", err)
@@ -67,8 +63,6 @@ func newSyncMapCache(tb testing.TB) *Cache {
 }
 
 func newBoltCache(tb testing.TB) *Cache {
-	tb.Helper()
-
 	options := &bolt.Options{
 		Timeout: 2 * time.Second,
 	}
@@ -149,6 +143,9 @@ func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
 	if err != nil {
 		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
 	}
+
+	// ok with this long of a delay
+	time.Sleep(10 * time.Millisecond)
 
 	nval, err := cache.Get(context.Background(), kv.GetKey())
 	if err != nil {
@@ -395,6 +392,7 @@ func doBenchmarks(b *testing.B, cache *Cache) {
 	for i := 0; i < 10000000; i++ {
 		vals = append(vals, randVal(b, 512))
 	}
+
 	b.Run("BenchmarkUniqueKeys", BUniqueKeys(cache, keys, vals))
 	cleanCache(b, cache)
 

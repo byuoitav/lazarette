@@ -42,14 +42,14 @@ func testEqual(tb testing.TB, expected, actual []byte) {
 	}
 }
 
-func TestPut(t *testing.T) {
+func TestSet(t *testing.T) {
 	store := newStore(t)
 	defer store.Close()
 
 	key := []byte("hello")
 	val := []byte(`{"test": "value"}`)
 
-	err := store.Put(key, val)
+	err := store.Set(key, val)
 	if err != nil {
 		t.Fatalf("failed to put key: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestClean(t *testing.T) {
 	key := []byte("hello")
 	val := []byte(`{"test": "value"}`)
 
-	err := store.Put(key, val)
+	err := store.Set(key, val)
 	if err != nil {
 		t.Fatalf("failed to put key: %v", err)
 	}

@@ -256,7 +256,7 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 		return fmt.Errorf("unable to marshal new value: %v", err)
 	}
 
-	err = s.store.Put([]byte(kv.GetKey().GetKey()), bytes)
+	err = s.store.Set([]byte(kv.GetKey().GetKey()), bytes)
 	if err != nil {
 		return fmt.Errorf("unable to put value into store: %v", err)
 	}

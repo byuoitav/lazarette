@@ -32,8 +32,8 @@ func (s *memstore) Get(key []byte) ([]byte, error) {
 	return val, nil
 }
 
-// Put .
-func (s *memstore) Put(key, val []byte) error {
+// Set .
+func (s *memstore) Set(key, val []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

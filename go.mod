@@ -3,6 +3,7 @@ module github.com/byuoitav/lazarette
 go 1.13
 
 require (
+	github.com/dgraph-io/ristretto v0.0.0-20190924012251-ae326c3348e8
 	github.com/fatih/color v1.7.0 // indirect
 	github.com/golang/protobuf v1.3.2
 	github.com/gorilla/websocket v1.4.1

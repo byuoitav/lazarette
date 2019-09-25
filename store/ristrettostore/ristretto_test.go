@@ -1,29 +1,26 @@
-package memstore
+package ristrettostore
 
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
-func newStore(tb testing.TB) *memstore {
-	tb.Helper()
-
-	store, err := NewStore()
+func newStore(tb testing.TB) *ristrettostore {
+	store, err := NewStore(100 << 20) // 100mb
 	if err != nil {
-		tb.Fatalf("failed to create memstore: %v", err)
+		tb.Fatalf("failed to create ristrettostore: %v", err)
 	}
 
 	err = store.Clean()
 	if err != nil {
-		tb.Fatalf("failed to clean memstore: %v", err)
+		tb.Fatalf("failed to clean ristrettostore: %v", err)
 	}
 
-	return store.(*memstore)
+	return store.(*ristrettostore)
 }
 
 func testEqual(tb testing.TB, expected, actual []byte) {
-	tb.Helper()
-
 	if !bytes.Equal(expected, actual) {
 		tb.Fatalf("values didn't match:\nexpected: 0x%x\nactual: 0x%x", expected, actual)
 	}
@@ -40,6 +37,8 @@ func TestSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to put key: %v", err)
 	}
+
+	time.Sleep(10 * time.Millisecond) // let value pass through buffer
 
 	nval, err := store.Get(key)
 	if err != nil {

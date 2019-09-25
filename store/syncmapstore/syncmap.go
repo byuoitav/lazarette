@@ -33,7 +33,7 @@ func (s *syncmapstore) Get(key []byte) ([]byte, error) {
 }
 
 // Put .
-func (s *syncmapstore) Put(key, val []byte) error {
+func (s *syncmapstore) Set(key, val []byte) error {
 	s.Store(string(key), val)
 	return nil
 }
