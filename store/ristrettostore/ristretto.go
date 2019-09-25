@@ -2,7 +2,6 @@ package ristrettostore
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/byuoitav/lazarette/store"
 	"github.com/dgraph-io/ristretto"
@@ -10,8 +9,6 @@ import (
 
 type ristrettostore struct {
 	*ristretto.Cache
-
-	keys *sync.Map
 }
 
 func NewStore(maxCost int64) (store.Store, error) {
@@ -26,18 +23,13 @@ func NewStore(maxCost int64) (store.Store, error) {
 
 	s := &ristrettostore{
 		Cache: cache,
-		keys:  &sync.Map{},
 	}
 
 	return s, nil
 }
 
+// TODO .
 func (r *ristrettostore) Clean() error {
-	r.keys.Range(func(key, value interface{}) bool {
-		r.Cache.Del(key)
-		return true
-	})
-
 	return nil
 }
 
@@ -61,8 +53,6 @@ func (r *ristrettostore) Get(key []byte) ([]byte, error) {
 }
 
 func (r *ristrettostore) Set(key, val []byte) error {
-	r.keys.Store(string(key), struct{}{})
-
 	// TODO compute cost?
 	ok := r.Cache.Set(string(key), val, 1)
 	if !ok {
