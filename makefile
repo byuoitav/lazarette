@@ -20,7 +20,7 @@ test:
 	@go test -v ${PKG_LIST}
 
 test-cov:
-	@go test -coverprofile coverage.txt ${PKG_LIST}
+	@go test -coverprofile=coverage.txt -covermode=atomic ${PKG_LIST}
 
 clean:
 	@rm -f dist/

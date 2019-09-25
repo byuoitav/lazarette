@@ -97,8 +97,6 @@ func newBoltCache(tb testing.TB) *Cache {
 }
 
 func closeCache(tb testing.TB, s *Cache) {
-	tb.Helper()
-
 	err := s.Close()
 	if err != nil {
 		tb.Fatalf("failed to close Cache: %v", err)
@@ -106,8 +104,6 @@ func closeCache(tb testing.TB, s *Cache) {
 }
 
 func cleanCache(tb testing.TB, s *Cache) {
-	tb.Helper()
-
 	err := s.Clean()
 	if err != nil {
 		tb.Fatalf("failed to clean Cache: %v", err)
@@ -115,8 +111,6 @@ func cleanCache(tb testing.TB, s *Cache) {
 }
 
 func randKey(tb testing.TB, maxLength int) *Key {
-	tb.Helper()
-
 	for {
 		b := make([]byte, seededRand.Intn(maxLength))
 		for i := range b {
@@ -132,8 +126,6 @@ func randKey(tb testing.TB, maxLength int) *Key {
 }
 
 func randVal(tb testing.TB, maxLength int) *Value {
-	tb.Helper()
-
 	buf := make([]byte, seededRand.Intn(maxLength))
 	_, err := seededRand.Read(buf)
 	if err != nil {
@@ -147,16 +139,12 @@ func randVal(tb testing.TB, maxLength int) *Value {
 }
 
 func checkValueEqual(tb testing.TB, key *Key, expected, actual *Value) {
-	tb.Helper()
-
 	if !proto.Equal(expected, actual) {
 		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key.GetKey(), expected.String(), actual.String())
 	}
 }
 
 func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
-	tb.Helper()
-
 	_, err := cache.Set(context.Background(), kv)
 	if err != nil {
 		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
