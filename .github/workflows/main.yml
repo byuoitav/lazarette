@@ -63,10 +63,15 @@ jobs:
 
       - name: Build
         run: |
+          export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
+
+          # install protoc
           export PROTOBUF_VERSION=3.9.2
           export PROTOC_FILENAME=protoc-${PROTOBUF_VERSION}-linux-x86_64
           curl -o ${PROTOC_FILENAME}.zip -sfL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_FILENAME}.zip"
           unzip ${PROTOC_FILENAME}.zip
           mkdir --parents $(go env GOPATH)/bin/; mv bin/protoc $(go env GOPATH)/bin/protoc
-          export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
+          mv include/google /usr/include
+
+          # build binary
           make

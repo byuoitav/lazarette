@@ -1,7 +1,6 @@
 package handlers
 
 /*
-
 var (
 	upgrader = websocket.Upgrader{
 		EnableCompression: true,

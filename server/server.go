@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
 
 	"github.com/byuoitav/lazarette/lazarette"
 	"github.com/byuoitav/lazarette/log"
+	"github.com/byuoitav/lazarette/server/handlers"
 	"github.com/labstack/echo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -48,11 +50,7 @@ func (s *Server) Serve(grpcAddr string, httpAddr string) {
 		}
 
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			go s.serveHTTP(httpLis, wg)
-		}()
+		go s.serveHTTP(httpLis, wg)
 
 		log.P.Info("Started http server", zap.String("address", httpLis.Addr().String()))
 	}
@@ -80,12 +78,10 @@ func (s *Server) serveHTTP(l net.Listener, wg *sync.WaitGroup) {
 	s.echo.HidePort = true
 	s.echo.Listener = l
 
-	// TODO add endpoints here
-	s.echo.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "hello!")
-	})
+	s.echo.GET("/cache/:key", handlers.GetKey(s.Cache))
+	s.echo.PUT("/cache/:key", handlers.SetKey(s.Cache))
 
-	if err := s.echo.Start(""); err != nil {
+	if err := s.echo.Start(""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.P.Fatal("failed to serve http", zap.Error(err))
 	}
 }
