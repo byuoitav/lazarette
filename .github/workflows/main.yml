@@ -68,13 +68,13 @@ jobs:
           # install protoc
           export PROTOC_VERSION=3.9.2
           export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip
-          curl -sfLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"
+          curl -fLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"
           unzip ${PROTOC_ZIP}
           mv bin/protoc $(go env GOPATH)/bin/
           mv include/* ./lazarette/
 
-          echo "lazarette dir"
-          ls -la ./lazarette/
-
           # build binary
           make
+
+          ls -la
+          ls -la dist/
