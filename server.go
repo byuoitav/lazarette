@@ -23,5 +23,8 @@ func main() {
 		Cache: cache,
 	}
 
-	server.Serve(":7777", ":7778")
+	err = server.Serve(":7777", ":7778")
+	if err != nil {
+		log.P.Fatal("failed to serve", zap.Error(err))
+	}
 }
