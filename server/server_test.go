@@ -39,12 +39,20 @@ func newCache(tb testing.TB) *lazarette.Cache {
 	return cache
 }
 
-func startServer(cache *lazarette.Cache, grpcAddr, httpAddr string) *Server {
+func startServer(tb testing.TB, cache *lazarette.Cache, grpcAddr, httpAddr string) *Server {
+	tb.Helper()
+
 	server := &Server{
 		Cache: cache,
 	}
 
-	go server.Serve(grpcAddr, httpAddr)
+	go func() {
+		err := server.Serve(grpcAddr, httpAddr)
+		if err != nil {
+			tb.Fatalf("failed to serve: %v", err)
+		}
+	}()
+
 	return server
 }
 
@@ -64,14 +72,14 @@ func checkValueEqual(tb testing.TB, key *lazarette.Key, expected, actual *lazare
 }
 
 func TestMain(m *testing.M) {
-	log.Config.Level.SetLevel(zap.PanicLevel)
+	log.Config.Level.SetLevel(zap.ErrorLevel)
 	os.Exit(m.Run())
 }
 
 func TestGRPCServer(t *testing.T) {
 	ctx := context.Background()
 
-	server := startServer(newCache(t), ":7777", "")
+	server := startServer(t, newCache(t), ":7777", "")
 	client := newGRPCClient(t, "localhost:7777")
 	defer server.Stop(ctx)
 
@@ -106,7 +114,7 @@ func TestGRPCServer(t *testing.T) {
 func TestHttpServer(t *testing.T) {
 	ctx := context.Background()
 
-	server := startServer(newCache(t), "", ":7778")
+	server := startServer(t, newCache(t), "", ":7788")
 	defer server.Stop(ctx)
 
 	client := &http.Client{}
@@ -125,7 +133,7 @@ func TestHttpServer(t *testing.T) {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, "http://localhost:7778/cache/"+kv.GetKey().GetKey(), bytes.NewBuffer(kv.GetValue().GetData()))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, "http://localhost:7788/cache/"+kv.GetKey().GetKey(), bytes.NewBuffer(kv.GetValue().GetData()))
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -143,7 +151,7 @@ func TestHttpServer(t *testing.T) {
 			t.Fatalf("invalid response on set:\nexpected: %s\ngot: %s\n", expected, string(buf))
 		}
 
-		req, _ = http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:7778/cache/"+kv.GetKey().GetKey(), nil)
+		req, _ = http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:7788/cache/"+kv.GetKey().GetKey(), nil)
 
 		resp2, err := client.Do(req)
 		if err != nil {
@@ -156,7 +164,6 @@ func TestHttpServer(t *testing.T) {
 			t.Fatalf("failed to read response from get: %v", err)
 		}
 
-		fmt.Printf("header: %s\n", resp2.Header.Get("Last-Modified"))
 		tstamp, _ := time.Parse(time.RFC3339Nano, resp2.Header.Get("Last-Modified"))
 		ptstamp, _ := ptypes.TimestampProto(tstamp)
 

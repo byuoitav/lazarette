@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -24,9 +25,9 @@ type Server struct {
 }
 
 // Serve .
-func (s *Server) Serve(grpcAddr string, httpAddr string) {
+func (s *Server) Serve(grpcAddr string, httpAddr string) error {
 	if len(grpcAddr) == 0 && len(httpAddr) == 0 {
-		log.P.Fatal("must pass at least one address to bind to")
+		return errors.New("must pass at least one address to bind to")
 	}
 
 	wg := &sync.WaitGroup{}
@@ -34,7 +35,7 @@ func (s *Server) Serve(grpcAddr string, httpAddr string) {
 	if len(grpcAddr) > 0 {
 		grpcLis, err := net.Listen("tcp", grpcAddr)
 		if err != nil {
-			log.P.Fatal("failed to bind grpc listener", zap.Error(err))
+			return fmt.Errorf("unable to bind grpc listener: %v", err)
 		}
 
 		wg.Add(1)
@@ -46,7 +47,7 @@ func (s *Server) Serve(grpcAddr string, httpAddr string) {
 	if len(httpAddr) > 0 {
 		httpLis, err := net.Listen("tcp", httpAddr)
 		if err != nil {
-			log.P.Fatal("failed to bind http listener", zap.Error(err))
+			return fmt.Errorf("unable to bind http listener: %v", err)
 		}
 
 		wg.Add(1)
@@ -57,6 +58,8 @@ func (s *Server) Serve(grpcAddr string, httpAddr string) {
 
 	wg.Wait()
 	log.P.Info("Lazarette server shut down")
+
+	return nil
 }
 
 func (s *Server) serveGRPC(l net.Listener, wg *sync.WaitGroup) {

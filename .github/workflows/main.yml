@@ -50,7 +50,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    # needs: [lint, test]
+    needs: [lint, test]
     steps:
       - name: Set up go
         uses: actions/setup-go@v1
@@ -76,5 +76,4 @@ jobs:
           # build binary
           make
 
-          ls -la
-          ls -la dist/
+          # TODO do something with this...
