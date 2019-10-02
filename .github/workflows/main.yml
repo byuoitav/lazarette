@@ -67,7 +67,8 @@ jobs:
           # install protoc
           export PROTOC_VERSION=3.9.2
           export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip
-          curl -sfLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_ZIP}"
+          curl -fLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_ZIP}"
+          echo "downloaded"
           unzip -o ${PROTOC_ZIP} -d $(go env GOPATH)/bin/ bin/protoc
           unzip -o ${PROTOC_ZIP} -d ./lazarette/ 'include/*'
           echo "hello"
