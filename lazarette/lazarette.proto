@@ -1,0 +1,26 @@
+syntax = "proto3";
+package lazarette;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service Lazarette {
+    rpc Get (Key) returns (Value) {}
+
+    rpc Set (KeyValue) returns (google.protobuf.Empty) {}
+    rpc Subscribe(Key) returns (stream KeyValue) {}
+}
+
+message Key {
+    string key = 1;
+}
+
+message Value {
+    google.protobuf.Timestamp timestamp = 1;
+    bytes data = 2;
+}
+
+message KeyValue {
+    Key key = 1;
+    Value value = 2;
+}

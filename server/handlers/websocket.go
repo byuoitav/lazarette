@@ -1,17 +1,6 @@
 package handlers
 
-import (
-	"bytes"
-	"fmt"
-	"log"
-	"net/http"
-
-	"github.com/byuoitav/lazarette/cache"
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/gorilla/websocket"
-	"github.com/labstack/echo"
-)
-
+/*
 var (
 	upgrader = websocket.Upgrader{
 		EnableCompression: true,
@@ -62,3 +51,4 @@ func Subscribe(cc cache.Cache) echo.HandlerFunc {
 		}
 	}
 }
+*/

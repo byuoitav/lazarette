@@ -70,8 +70,8 @@ func (s *boltstore) Get(key []byte) ([]byte, error) {
 	return val, err
 }
 
-// Put .
-func (s *boltstore) Put(key []byte, val []byte) error {
+// Set .
+func (s *boltstore) Set(key, val []byte) error {
 	err := s.Batch(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(DefaultBucket)
 		if bucket == nil {
