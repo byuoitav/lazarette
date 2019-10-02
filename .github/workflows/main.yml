@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - master
-      - grpc
   pull_request:
     branches:
       - master
