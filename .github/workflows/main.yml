@@ -62,15 +62,18 @@ jobs:
 
       - name: Build
         run: |
+          mkdir --parents $(go env GOPATH)/bin/
           export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
 
           # install protoc
           export PROTOC_VERSION=3.9.2
           export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip
           curl -sfLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"
-          mkdir --parents $(go env GOPATH)/bin/
-          unzip -o ${PROTOC_ZIP} -d $(go env GOPATH)/bin/ bin/protoc
-          unzip -o ${PROTOC_ZIP} -d ./lazarette/ 'include/*'
+          unzip ${PROTOC_ZIP}
+          mv bin/protoc $(go env GOPATH)/bin/
+          mv include/* ./lazarette/
+
+          echo "lazarette dir"
           ls -la ./lazarette/
 
           # build binary
