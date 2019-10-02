@@ -50,7 +50,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    # needs: [lint, test]
     steps:
       - name: Set up go
         uses: actions/setup-go@v1
@@ -68,9 +68,10 @@ jobs:
           export PROTOBUF_VERSION=3.9.2
           export PROTOC_FILENAME=protoc-${PROTOBUF_VERSION}-linux-x86_64
           curl -o ${PROTOC_FILENAME}.zip -sfL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOC_FILENAME}.zip"
-          unzip ${PROTOC_FILENAME}.zip
-          mkdir --parents $(go env GOPATH)/bin/; mv bin/protoc $(go env GOPATH)/bin/protoc
-          mv include/google /usr/include
+          unzip -o ${PROTOC_FILENAME}.zip -d $(go env GOPATH)/bin/ bin/protoc
+          unzip -o ${PROTOC_FILENAME}.zip -d /usr/local 'include/*'
+          # mkdir --parents $(go env GOPATH)/bin/; mv bin/protoc $(go env GOPATH)/bin/protoc
+          # mv include/google /usr/include
 
           # build binary
           make
