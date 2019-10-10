@@ -7,7 +7,6 @@ import (
 
 func newStore(tb testing.TB) *syncmapstore {
 	tb.Helper()
-
 	store, err := NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create memstore: %v", err)
