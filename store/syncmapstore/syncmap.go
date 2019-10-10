@@ -53,7 +53,7 @@ func (s *syncmapstore) Close() error {
 func (s *syncmapstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
 	var kvs []store.KeyValue
 
-	s.Map.Range(func(key interface{}, value interface{}) bool {
+	s.Map.Range(func(key, value interface{}) bool {
 		k := key.(string)
 
 		if strings.HasPrefix(k, string(prefix)) {

@@ -6,7 +6,6 @@ import (
 )
 
 func newStore(tb testing.TB) *syncmapstore {
-	tb.Helper()
 	store, err := NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create memstore: %v", err)
@@ -21,8 +20,6 @@ func newStore(tb testing.TB) *syncmapstore {
 }
 
 func testEqual(tb testing.TB, expected, actual []byte) {
-	tb.Helper()
-
 	if !bytes.Equal(expected, actual) {
 		tb.Fatalf("values didn't match:\nexpected: 0x%x\nactual: 0x%x", expected, actual)
 	}
