@@ -1,0 +1,6 @@
+= Introduction to Lazarette
+
+Lazarette is an open source in-memory cache used in BYU OIT AV's room control solution. Its a main feature is the ability to replicate specific prefix's of data to another instance of Lazarette.
+This allows us to run a "central" version of Lazarette in the cloud that has _all_ off the room specific data that we need to cache, while only replicating that specific room's data to the Raspberry Pi's that are in that room so that the low memory/cpu restrictions of the Pi can be met.
+
+Other than the replication, Lazarette is a simple key-value cache that that is controlled via GRPC calls.

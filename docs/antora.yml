@@ -1,0 +1,6 @@
+name: lazarette
+version: master
+title: Lazarette
+nav:
+  - modules/ROOT/nav.adoc
+  - modules/stores/nav.adoc
