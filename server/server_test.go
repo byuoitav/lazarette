@@ -109,6 +109,16 @@ func TestGRPCServer(t *testing.T) {
 
 		checkValueEqual(t, kv.GetKey(), kv.GetValue(), nval)
 	})
+
+	err := server.Cache.Clean()
+	if err != nil {
+		t.Fatalf("unable to clean cache between tests: %s", err)
+	}
+
+	t.Run("ReplicationSet", func(t *testing.T) {
+		server2 := startServer(t, newCache(t), ":45363", "")
+		defer server2.Stop(ctx)
+	})
 }
 
 func TestHttpServer(t *testing.T) {

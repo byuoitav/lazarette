@@ -33,30 +33,25 @@ type Cache struct {
 
 	subsMu sync.RWMutex
 	subs   map[string][]chan *KeyValue
+
+	replsMu sync.RWMutex
+	repls   []*replication
 }
 
-// Replication .
-type Replication struct {
-	KeyPrefix  string `json:"key-prefix"`
-	RemoteAddr string `json:"remote-addr"`
+type replication struct {
+	*Replication
+	LazaretteClient
+	*zap.Logger
 }
 
 // UnsubscribeFunc .
 type UnsubscribeFunc func()
 
 // NewCache .
-func NewCache(store store.Store, repls ...Replication) (*Cache, error) {
+func NewCache(store store.Store) (*Cache, error) {
 	s := &Cache{
 		store: store,
 		subs:  make(map[string][]chan *KeyValue),
-	}
-
-	for _, repl := range repls {
-		// TODO error codes for each replication?
-		err := s.ReplicateFrom(context.TODO(), repl)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return s, nil
@@ -81,7 +76,7 @@ func (s *Cache) Get(ctx context.Context, key *Key) (*Value, error) {
 	val := &Value{}
 	err = proto.Unmarshal(data, val)
 	if err != nil {
-		return nil, fmt.Errorf("unable to unmarshal val: %v", err)
+		return nil, fmt.Errorf("unable to unmarshal val: %w", err)
 	}
 
 	log.P.Debug("Successfully got", zap.String("key", key.GetKey()), zap.ByteString("value", val.GetData()))
@@ -97,15 +92,38 @@ func (s *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 	}
 
 	// notify all subscriptions that this key has updated
+	// TODO add some timeout so that one slow connection doesn't hold things up?
 	s.subsMu.RLock()
 	for prefix, chans := range s.subs {
-		if strings.HasPrefix(kv.GetKey().GetKey(), prefix) {
+		if strings.HasPrefix(kv.GetKey(), prefix) {
 			for i := range chans {
 				chans[i] <- kv
 			}
 		}
 	}
 	s.subsMu.RUnlock()
+
+	/*
+		// notify everyone i'm replicating with
+		go func() {
+			s.replsMu.RLock()
+			defer s.replsMu.RUnlock()
+
+			for _, repl := range s.repls {
+				nctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+				_, err := repl.Set(nctx, kv)
+				if err != nil {
+					log.P.Warn("unable to set updated key on replication", zap.String("repl", repl.RemoteAddr), zap.Error(err))
+				} else {
+					log.P.Info("updated key on replication", zap.String("repl", repl.RemoteAddr), zap.String("key", kv.GetKey()))
+				}
+
+				// make sure context doesn't leak
+				cancel()
+			}
+		}()
+	*/
 
 	return &empty.Empty{}, nil
 }
@@ -119,8 +137,8 @@ func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	ch, unsub := s.SubscribeChan(prefix.GetKey())
 	for kv := range ch {
 		err := stream.Send(kv)
-		if err != nil {
-			log.P.Warn("Failed to send to stream", zap.Error(err), zap.String("key", kv.GetKey().GetKey()))
+		if err != nil { // TODO should probably switch on the error
+			log.P.Warn("failed to send to stream", zap.Error(err), zap.String("key", kv.GetKey()))
 			unsub()
 			return err
 		}
@@ -133,6 +151,29 @@ func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	ch := make(chan *KeyValue, 16)
 	log.P.Info("Subscribing to", zap.String("prefix", prefix))
+
+	go func() {
+		// get a dump of the cache, send that down the stream
+		kvs, err := s.store.GetPrefix([]byte(prefix))
+		if err != nil {
+			log.P.Warn("unable to get prefix dump", zap.String("prefix", prefix), zap.Error(err))
+			return
+		}
+
+		for i := range kvs {
+			var v Value
+			if err := proto.Unmarshal(kvs[i].Value, &v); err != nil {
+				log.P.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
+				continue
+			}
+
+			ch <- &KeyValue{
+				Key:       string(kvs[i].Key),
+				Timestamp: v.GetTimestamp(),
+				Data:      v.GetData(),
+			}
+		}
+	}()
 
 	unsubscribe := func() {
 		log.P.Info("Unsubscribing from", zap.String("prefix", prefix))
@@ -158,45 +199,76 @@ func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	return ch, unsubscribe
 }
 
-// ReplicateFrom .
-func (s *Cache) ReplicateFrom(ctx context.Context, repl Replication) error {
+// ReplicateWith .
+func (s *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Empty, error) {
 	// TODO make the connection retry if it disconnects
-	conn, err := grpc.Dial(repl.RemoteAddr)
+	conn, err := grpc.Dial(repl.GetRemoteAddr(), grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		return fmt.Errorf("unable to open connection: %v", err)
+		return nil, fmt.Errorf("unable to open connection: %w", err)
 	}
-	defer conn.Close()
 
-	client := NewLazaretteClient(conn)
+	r := &replication{
+		Replication:     repl,
+		LazaretteClient: NewLazaretteClient(conn),
+		Logger:          log.P.Named("repl-" + repl.GetRemoteAddr()),
+	}
+
+	s.replsMu.Lock()
+	s.repls = append(s.repls, r)
+	s.replsMu.Unlock()
+
+	defer func() {
+		s.replsMu.Lock()
+		defer s.replsMu.Unlock()
+
+		// TODO remove from the repls list
+		conn.Close()
+	}()
+
+	// get all changes from the remote address
 	prefix := &Key{
-		Key: repl.KeyPrefix,
+		Key: repl.GetPrefix(),
 	}
 
-	stream, err := client.Subscribe(ctx, prefix)
+	stream, err := r.Subscribe(ctx, prefix)
 	if err != nil {
-		return fmt.Errorf("unable to subscribe: %v", err)
+		return nil, fmt.Errorf("unable to subscribe: %w", err)
 	}
 
-	for {
-		kv, err := stream.Recv()
-		switch {
-		case kv == nil:
-			continue
-		case err == io.EOF:
-			break
-		case err != nil:
-			return fmt.Errorf("unable to recv message from stream: %v", err)
-		}
+	go func() {
+		for {
+			kv, err := stream.Recv()
+			switch {
+			case kv == nil:
+				continue
+			case err == io.EOF:
+				break
+			case err != nil:
+				// TODO handle error
+				// return fmt.Errorf("unable to recv message from stream: %w", err)
+			}
 
-		if kv.GetKey() != nil {
-			log.P.Info("Received value", zap.String("from", repl.RemoteAddr), zap.String("key", kv.GetKey().GetKey()))
-		}
+			r.Info("Received value", zap.String("key", kv.GetKey()))
 
-		err = s.set(ctx, kv)
-		if err != nil && !errors.Is(err, ErrNotNew) {
-			log.P.Warn("unable to set key", zap.String("from", repl.RemoteAddr), zap.Error(err))
+			err = s.set(ctx, kv)
+			if err != nil && !errors.Is(err, ErrNotNew) {
+				log.P.Warn("unable to set key", zap.Error(err))
+			}
+		}
+	}()
+
+	// send all of our changes (and current state) to the remote address
+	changes, unsub := s.SubscribeChan(r.GetPrefix())
+	defer unsub()
+
+	for change := range changes {
+		_, err := r.Set(ctx, change)
+		if err != nil {
+			r.Warn("unable to update remote lazarette", zap.String("key", change.GetKey()))
 		}
 	}
+
+	return &empty.Empty{}, nil
 }
 
 // Close .
@@ -215,22 +287,18 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 	switch {
 	case kv == nil:
 		return errors.New("kv must not be nil")
-	case kv.GetKey() == nil:
-		return errors.New("key must not be nil")
-	case kv.GetValue() == nil:
-		return errors.New("value must not be nil")
-	case kv.GetValue().GetTimestamp() == nil:
+	case kv.GetTimestamp() == nil:
 		return errors.New("timestamp must not be nil")
 	}
 
-	log.P.Info("Setting", zap.String("key", kv.GetKey().GetKey()), zap.ByteString("value", kv.GetValue().GetData()))
+	log.P.Info("Setting", zap.String("key", kv.GetKey()), zap.ByteString("value", kv.GetData()))
 
 	// get the current val
-	cur, err := s.Get(ctx, kv.GetKey())
+	cur, err := s.Get(ctx, &Key{Key: kv.GetKey()})
 	switch {
 	case errors.Is(err, ErrKeyNotFound):
 	case err != nil:
-		return fmt.Errorf("unable to get current value: %v", err)
+		return fmt.Errorf("unable to get current value: %w", err)
 	case cur == nil:
 		return fmt.Errorf("weird. current value AND error were nil")
 	}
@@ -238,12 +306,12 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 	if cur.GetTimestamp() != nil {
 		curTime, err := ptypes.Timestamp(cur.GetTimestamp())
 		if err != nil {
-			return fmt.Errorf("unable to check current timestamp: %v", err)
+			return fmt.Errorf("unable to check current timestamp: %w", err)
 		}
 
-		valTime, err := ptypes.Timestamp(kv.GetValue().GetTimestamp())
+		valTime, err := ptypes.Timestamp(kv.GetTimestamp())
 		if err != nil {
-			return fmt.Errorf("unable to check timestamp: %v", err)
+			return fmt.Errorf("unable to check timestamp: %w", err)
 		}
 
 		if valTime.Before(curTime) {
@@ -251,16 +319,16 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 		}
 	}
 
-	bytes, err := proto.Marshal(kv.GetValue())
+	bytes, err := proto.Marshal(&Value{Timestamp: kv.GetTimestamp(), Data: kv.GetData()})
 	if err != nil {
-		return fmt.Errorf("unable to marshal new value: %v", err)
+		return fmt.Errorf("unable to marshal new value: %w", err)
 	}
 
-	err = s.store.Set([]byte(kv.GetKey().GetKey()), bytes)
+	err = s.store.Set([]byte(kv.GetKey()), bytes)
 	if err != nil {
-		return fmt.Errorf("unable to put value into store: %v", err)
+		return fmt.Errorf("unable to put value into store: %w", err)
 	}
 
-	log.P.Debug("Successfully set", zap.String("key", kv.GetKey().GetKey()))
+	log.P.Debug("Successfully set", zap.String("key", kv.GetKey()))
 	return nil
 }

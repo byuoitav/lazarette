@@ -41,13 +41,9 @@ func SetKey(cache *lazarette.Cache) echo.HandlerFunc {
 		}
 
 		kv := &lazarette.KeyValue{
-			Key: &lazarette.Key{
-				Key: c.Param("key"),
-			},
-			Value: &lazarette.Value{
-				Timestamp: ptypes.TimestampNow(),
-				Data:      bytes,
-			},
+			Key:       c.Param("key"),
+			Timestamp: ptypes.TimestampNow(),
+			Data:      bytes,
 		}
 
 		_, err = cache.Set(c.Request().Context(), kv)
@@ -55,6 +51,6 @@ func SetKey(cache *lazarette.Cache) echo.HandlerFunc {
 			return c.String(http.StatusInternalServerError, err.Error())
 		}
 
-		return c.String(http.StatusOK, "updated "+kv.GetKey().GetKey())
+		return c.String(http.StatusOK, "updated "+kv.GetKey())
 	}
 }

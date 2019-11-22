@@ -10,12 +10,9 @@ import (
 	"time"
 
 	"github.com/byuoitav/lazarette/log"
-	"github.com/byuoitav/lazarette/store/boltstore"
-	"github.com/byuoitav/lazarette/store/memstore"
 	"github.com/byuoitav/lazarette/store/syncmapstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
-	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 )
 
@@ -24,57 +21,10 @@ const charset = "abcdefghijklmnopqrstuvwxyz" +
 
 var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func newMemCache(tb testing.TB) *Cache {
-	store, err := memstore.NewStore()
-	if err != nil {
-		tb.Fatalf("failed to create memstore: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		tb.Fatalf("failed to start cache: %v", err)
-	}
-
-	err = cache.Clean()
-	if err != nil {
-		tb.Fatalf("failed to clean cache: %s", err)
-	}
-
-	return cache
-}
-
 func newSyncMapCache(tb testing.TB) *Cache {
 	store, err := syncmapstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create syncmap store: %v", err)
-	}
-
-	cache, err := NewCache(store)
-	if err != nil {
-		tb.Fatalf("failed to start cache: %v", err)
-	}
-
-	err = cache.Clean()
-	if err != nil {
-		tb.Fatalf("failed to clean cache: %s", err)
-	}
-
-	return cache
-}
-
-func newBoltCache(tb testing.TB) *Cache {
-	options := &bolt.Options{
-		Timeout: 2 * time.Second,
-	}
-
-	db, err := bolt.Open(os.TempDir()+"/lazarette.bolt", 0666, options)
-	if err != nil {
-		tb.Fatalf("failed to open bolt: %v", err)
-	}
-
-	store, err := boltstore.NewStore(db)
-	if err != nil {
-		tb.Fatalf("failed to create bolt store: %v", err)
 	}
 
 	cache, err := NewCache(store)
@@ -163,8 +113,6 @@ func TestMain(m *testing.M) {
 /* TESTS */
 
 func doCacheTest(t *testing.T, cache *Cache) {
-	t.Helper()
-
 	// testing it works
 	t.Run("TestSetAndGet", SetAndGet(cache))
 	cleanCache(t, cache)
@@ -203,16 +151,8 @@ func doCacheTest(t *testing.T, cache *Cache) {
 	closeCache(t, cache)
 }
 
-func TestMemStore(t *testing.T) {
-	doCacheTest(t, newMemCache(t))
-}
-
 func TestSyncMapStore(t *testing.T) {
 	doCacheTest(t, newSyncMapCache(t))
-}
-
-func TestBoltStore(t *testing.T) {
-	doCacheTest(t, newBoltCache(t))
 }
 
 func SetAndGet(cache *Cache) func(t *testing.T) {
@@ -379,6 +319,7 @@ func UnsubscribeTest(cache *Cache) func(*testing.T) {
 }
 
 /* BENCHMARKS */
+/*
 
 func doBenchmarks(b *testing.B, cache *Cache) {
 	// generate keys/values
@@ -578,3 +519,4 @@ func BConcurrentUniqueKeysAndVals(cache *Cache, ks []*Key, vs []*Value, routines
 		wg.Wait()
 	}
 }
+*/
