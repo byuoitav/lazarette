@@ -65,9 +65,9 @@ func newGRPCClient(tb testing.TB, address string) lazarette.LazaretteClient {
 	return lazarette.NewLazaretteClient(conn)
 }
 
-func checkValueEqual(tb testing.TB, key *lazarette.Key, expected, actual *lazarette.Value) {
+func checkValueEqual(tb testing.TB, key string, expected, actual *lazarette.Value) {
 	if !proto.Equal(expected, actual) {
-		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key.GetKey(), expected.String(), actual.String())
+		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key, expected.String(), actual.String())
 	}
 }
 
@@ -84,13 +84,9 @@ func TestGRPCServer(t *testing.T) {
 	defer server.Stop(ctx)
 
 	kv := &lazarette.KeyValue{
-		Key: &lazarette.Key{
-			Key: "ITB-1101-CP1",
-		},
-		Value: &lazarette.Value{
-			Timestamp: ptypes.TimestampNow(),
-			Data:      []byte(`{"key": "value"}`),
-		},
+		Key:       "ITB-1101-CP1",
+		Timestamp: ptypes.TimestampNow(),
+		Data:      []byte(`{"key": "value"}`),
 	}
 
 	t.Run("SetAndGet", func(t *testing.T) {
@@ -99,15 +95,15 @@ func TestGRPCServer(t *testing.T) {
 
 		_, err := client.Set(ctx, kv)
 		if err != nil {
-			t.Fatalf("failed to set %q: %v", kv.GetKey().GetKey(), err)
+			t.Fatalf("failed to set %q: %v", kv.GetKey(), err)
 		}
 
-		nval, err := client.Get(ctx, kv.GetKey())
+		nval, err := client.Get(ctx, &lazarette.Key{Key: kv.GetKey()})
 		if err != nil {
-			t.Fatalf("failed to get %q: %v", kv.GetKey().GetKey(), err)
+			t.Fatalf("failed to get %q: %v", kv.GetKey(), err)
 		}
 
-		checkValueEqual(t, kv.GetKey(), kv.GetValue(), nval)
+		checkValueEqual(t, kv.GetKey(), &lazarette.Value{Timestamp: kv.GetTimestamp(), Data: kv.GetData()}, nval)
 	})
 
 	err := server.Cache.Clean()
@@ -130,20 +126,16 @@ func TestHttpServer(t *testing.T) {
 	client := &http.Client{}
 
 	kv := &lazarette.KeyValue{
-		Key: &lazarette.Key{
-			Key: "ITB-1101-CP1",
-		},
-		Value: &lazarette.Value{
-			Timestamp: ptypes.TimestampNow(),
-			Data:      []byte(`{"key": "value"}`),
-		},
+		Key:       "ITB-1101-CP1",
+		Timestamp: ptypes.TimestampNow(),
+		Data:      []byte(`{"key": "value"}`),
 	}
 
 	t.Run("SetAndGet", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, "http://localhost:7788/cache/"+kv.GetKey().GetKey(), bytes.NewBuffer(kv.GetValue().GetData()))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, "http://localhost:7788/cache/"+kv.GetKey(), bytes.NewBuffer(kv.GetData()))
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -156,12 +148,12 @@ func TestHttpServer(t *testing.T) {
 			t.Fatalf("failed to read response from set: %v", err)
 		}
 
-		expected := fmt.Sprintf("updated %s", kv.GetKey().GetKey())
+		expected := fmt.Sprintf("updated %s", kv.GetKey())
 		if string(buf) != expected {
 			t.Fatalf("invalid response on set:\nexpected: %s\ngot: %s\n", expected, string(buf))
 		}
 
-		req, _ = http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:7788/cache/"+kv.GetKey().GetKey(), nil)
+		req, _ = http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:7788/cache/"+kv.GetKey(), nil)
 
 		resp2, err := client.Do(req)
 		if err != nil {
@@ -183,10 +175,10 @@ func TestHttpServer(t *testing.T) {
 		}
 
 		// reset the nanos (probably off)
-		kv.GetValue().GetTimestamp().Nanos = 0
+		kv.GetTimestamp().Nanos = 0
 		nval.Timestamp.Nanos = 0
 
-		checkValueEqual(t, kv.GetKey(), kv.GetValue(), nval)
+		checkValueEqual(t, kv.GetKey(), &lazarette.Value{Data: kv.GetData(), Timestamp: kv.GetTimestamp()}, nval)
 	})
 }
 

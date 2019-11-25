@@ -54,7 +54,7 @@ func cleanCache(tb testing.TB, s *Cache) {
 	}
 }
 
-func randKey(tb testing.TB, maxLength int) *Key {
+func randKey(tb testing.TB, maxLength int) string {
 	for {
 		b := make([]byte, seededRand.Intn(maxLength))
 		for i := range b {
@@ -62,9 +62,7 @@ func randKey(tb testing.TB, maxLength int) *Key {
 		}
 
 		if len(string(b)) > 0 {
-			return &Key{
-				Key: string(b),
-			}
+			return string(b)
 		}
 	}
 }
@@ -82,27 +80,37 @@ func randVal(tb testing.TB, maxLength int) *Value {
 	}
 }
 
-func checkValueEqual(tb testing.TB, key *Key, expected, actual *Value) {
+func randData(tb testing.TB, maxLength int) []byte {
+	buf := make([]byte, seededRand.Intn(maxLength))
+	_, err := seededRand.Read(buf)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	return buf
+}
+
+func checkValueEqual(tb testing.TB, key string, expected, actual *Value) {
 	if !proto.Equal(expected, actual) {
-		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key.GetKey(), expected.String(), actual.String())
+		tb.Fatalf("values don't match for key %q:\n\texpected: %s\n\tactual: %s\n", key, expected.String(), actual.String())
 	}
 }
 
 func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
 	_, err := cache.Set(context.Background(), kv)
 	if err != nil {
-		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+		tb.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey(), err, kv.GetData())
 	}
 
 	// ok with this long of a delay
 	time.Sleep(10 * time.Millisecond)
 
-	nval, err := cache.Get(context.Background(), kv.GetKey())
+	nval, err := cache.Get(context.Background(), &Key{Key: kv.GetKey()})
 	if err != nil {
-		tb.Fatalf("failed to get %q: %v", kv.GetKey().GetKey(), err)
+		tb.Fatalf("failed to get %q: %v", kv.GetKey(), err)
 	}
 
-	checkValueEqual(tb, kv.GetKey(), kv.GetValue(), nval)
+	checkValueEqual(tb, kv.GetKey(), &Value{Data: kv.GetData(), Timestamp: kv.GetTimestamp()}, nval)
 }
 
 func TestMain(m *testing.M) {
@@ -158,8 +166,9 @@ func TestSyncMapStore(t *testing.T) {
 func SetAndGet(cache *Cache) func(t *testing.T) {
 	return func(t *testing.T) {
 		kv := &KeyValue{
-			Key:   randKey(t, 50),
-			Value: randVal(t, 300),
+			Key:       randKey(t, 50),
+			Data:      randData(t, 300),
+			Timestamp: ptypes.TimestampNow(),
 		}
 
 		setAndCheck(t, cache, kv)
@@ -169,13 +178,15 @@ func SetAndGet(cache *Cache) func(t *testing.T) {
 func SettingTheSameKey(cache *Cache) func(t *testing.T) {
 	return func(t *testing.T) {
 		kv := &KeyValue{
-			Key:   randKey(t, 50),
-			Value: randVal(t, 300),
+			Key:       randKey(t, 50),
+			Data:      randData(t, 300),
+			Timestamp: ptypes.TimestampNow(),
 		}
 
 		for i := 0; i < 10; i++ {
 			setAndCheck(t, cache, kv)
-			kv.Value = randVal(t, 300)
+			kv.Timestamp = ptypes.TimestampNow()
+			kv.Data = randData(t, 300)
 		}
 	}
 }
@@ -194,13 +205,14 @@ func ConcurrentSettingTheSameKey(cache *Cache, routines, n int) func(t *testing.
 				for i := 0; i < n; i++ {
 					time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
 					kv := &KeyValue{
-						Key:   key,
-						Value: randVal(t, 300),
+						Key:       key,
+						Data:      randData(t, 300),
+						Timestamp: ptypes.TimestampNow(),
 					}
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey(), err, kv.GetData())
 					}
 				}
 			}()
@@ -222,13 +234,14 @@ func ConcurrentSettingRandomKeys(cache *Cache, routines, n int) func(t *testing.
 				for i := 0; i < n; i++ {
 					time.Sleep(time.Duration(seededRand.Intn(500)) * time.Millisecond)
 					kv := &KeyValue{
-						Key:   randKey(t, 50),
-						Value: randVal(t, 300),
+						Key:       randKey(t, 50),
+						Data:      randData(t, 300),
+						Timestamp: ptypes.TimestampNow(),
 					}
 
 					_, err := cache.Set(context.Background(), kv)
 					if err != nil && !errors.Is(err, ErrNotNew) {
-						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey().GetKey(), err, kv.GetValue().GetData())
+						t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey(), err, kv.GetData())
 					}
 				}
 			}()
@@ -244,13 +257,9 @@ func SubscriptionChanMatchTest(cache *Cache) func(t *testing.T) {
 		defer unsub()
 
 		kv := &KeyValue{
-			Key: &Key{
-				Key: "ITB-1101-CP1",
-			},
-			Value: &Value{
-				Timestamp: ptypes.TimestampNow(),
-				Data:      []byte(`{"test": "value"}`),
-			},
+			Key:       "ITB-1101-CP1",
+			Timestamp: ptypes.TimestampNow(),
+			Data:      []byte(`{"test": "value"}`),
 		}
 
 		_, err := cache.Set(context.Background(), kv)
@@ -262,20 +271,18 @@ func SubscriptionChanMatchTest(cache *Cache) func(t *testing.T) {
 			t.Fatalf("channel didn't get new value")
 		}
 
-		checkValueEqual(t, kv.GetKey(), kv.GetValue(), (<-ch).GetValue())
+		nkv := <-ch
+
+		checkValueEqual(t, kv.GetKey(), &Value{Timestamp: kv.GetTimestamp(), Data: kv.GetData()}, &Value{Timestamp: nkv.GetTimestamp(), Data: nkv.GetData()})
 	}
 }
 
 func SubscriptionChanNoMatchTest(cache *Cache) func(*testing.T) {
 	return func(t *testing.T) {
 		kv := &KeyValue{
-			Key: &Key{
-				Key: "ITC-1101-CP1", // prefix doesn't match
-			},
-			Value: &Value{
-				Timestamp: ptypes.TimestampNow(),
-				Data:      []byte(`{"test": "value"}`),
-			},
+			Key:       "ITC-1101-CP1", // prefix doesn't match
+			Timestamp: ptypes.TimestampNow(),
+			Data:      []byte(`{"test": "value"}`),
 		}
 
 		ch, unsub := cache.SubscribeChan("ITB")
@@ -295,13 +302,9 @@ func SubscriptionChanNoMatchTest(cache *Cache) func(*testing.T) {
 func UnsubscribeTest(cache *Cache) func(*testing.T) {
 	return func(t *testing.T) {
 		kv := &KeyValue{
-			Key: &Key{
-				Key: "ITB-1101-CP1",
-			},
-			Value: &Value{
-				Timestamp: ptypes.TimestampNow(),
-				Data:      []byte(`{"test": "value"}`),
-			},
+			Key:       "ITB-1101-CP1",
+			Timestamp: ptypes.TimestampNow(),
+			Data:      []byte(`{"test": "value"}`),
 		}
 
 		ch, unsub := cache.SubscribeChan("ITB")
