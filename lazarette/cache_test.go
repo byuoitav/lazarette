@@ -385,8 +385,7 @@ func BenchmarkSyncMapStore(b *testing.B) {
 }
 
 func BenchmarkBoltStore(b *testing.B) {
-	doBenchmarks(b, newBoltCache(b))
-}
+	doBenchmarks(b, newBoltCache(b)) }
 
 func BUniqueKeys(cache *Cache, ks []*Key, vs []*Value) func(b *testing.B) {
 	return func(b *testing.B) {

@@ -19,13 +19,13 @@ import (
 	"google.golang.org/grpc"
 )
 
-func newCache(tb testing.TB) *lazarette.Cache {
+func newCache(tb testing.TB, logger *zap.Logger) *lazarette.Cache {
 	store, err := syncmapstore.NewStore()
 	if err != nil {
 		tb.Fatalf("failed to create store: %v", err)
 	}
 
-	cache, err := lazarette.NewCache(store)
+	cache, err := lazarette.NewCache(store, logger)
 	if err != nil {
 		tb.Fatalf("failed to create cache: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestMain(m *testing.M) {
 func TestGRPCServer(t *testing.T) {
 	ctx := context.Background()
 
-	server := startServer(t, newCache(t), ":7777", "")
+	server := startServer(t, newCache(t, log.P.Named(":7777")), ":7777", "")
 	client := newGRPCClient(t, "localhost:7777")
 	defer server.Stop(ctx)
 
@@ -111,16 +111,51 @@ func TestGRPCServer(t *testing.T) {
 		t.Fatalf("unable to clean cache between tests: %s", err)
 	}
 
-	t.Run("ReplicationSet", func(t *testing.T) {
-		server2 := startServer(t, newCache(t), ":45363", "")
+	t.Run("ReplicationGetInitialValues", func(t *testing.T) {
+		// print logs
+		log.Config.Level.SetLevel(zap.InfoLevel)
+		defer log.Config.Level.SetLevel(zap.WarnLevel)
+
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		server2 := startServer(t, newCache(t, log.P.Named(":45363")), ":45363", "")
 		defer server2.Stop(ctx)
+
+		// set a value in server1
+		_, err := client.Set(ctx, kv)
+		if err != nil {
+			t.Fatalf("failed to set %q: %v", kv.GetKey(), err)
+		}
+
+		// have server2 replicate from server1
+		client2 := newGRPCClient(t, "localhost:45363")
+		go func() {
+			_, err = client2.ReplicateWith(ctx, &lazarette.Replication{
+				RemoteAddr: "localhost:7777",
+				Prefix:     "ITB-1101-",
+			})
+			if err != nil {
+				t.Logf("failed to replicate with server1: %s", err)
+			}
+		}()
+
+		// let it replicate...
+		time.Sleep(5 * time.Second)
+
+		nval, err := client2.Get(ctx, &lazarette.Key{Key: kv.GetKey()})
+		if err != nil {
+			t.Fatalf("failed to get %q: %v", kv.GetKey(), err)
+		}
+
+		checkValueEqual(t, kv.GetKey(), &lazarette.Value{Timestamp: kv.GetTimestamp(), Data: kv.GetData()}, nval)
 	})
 }
 
 func TestHttpServer(t *testing.T) {
 	ctx := context.Background()
 
-	server := startServer(t, newCache(t), "", ":7788")
+	server := startServer(t, newCache(t, log.P.Named(":7788")), "", ":7788")
 	defer server.Stop(ctx)
 
 	client := &http.Client{}

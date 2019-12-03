@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/byuoitav/lazarette/log"
 	"github.com/byuoitav/lazarette/store"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
@@ -36,6 +35,8 @@ type Cache struct {
 
 	replsMu sync.RWMutex
 	repls   []*replication
+
+	*zap.Logger
 }
 
 type replication struct {
@@ -48,10 +49,11 @@ type replication struct {
 type UnsubscribeFunc func()
 
 // NewCache .
-func NewCache(store store.Store) (*Cache, error) {
+func NewCache(store store.Store, logger *zap.Logger) (*Cache, error) {
 	s := &Cache{
-		store: store,
-		subs:  make(map[string][]chan *KeyValue),
+		store:  store,
+		subs:   make(map[string][]chan *KeyValue),
+		Logger: logger,
 	}
 
 	return s, nil
@@ -63,7 +65,7 @@ func (s *Cache) Get(ctx context.Context, key *Key) (*Value, error) {
 		return nil, errors.New("key must not be nil")
 	}
 
-	log.P.Info("Getting", zap.String("key", key.GetKey()))
+	s.Info("Getting", zap.String("key", key.GetKey()))
 
 	data, err := s.store.Get([]byte(key.GetKey()))
 	switch {
@@ -79,7 +81,7 @@ func (s *Cache) Get(ctx context.Context, key *Key) (*Value, error) {
 		return nil, fmt.Errorf("unable to unmarshal val: %w", err)
 	}
 
-	log.P.Debug("Successfully got", zap.String("key", key.GetKey()), zap.ByteString("value", val.GetData()))
+	s.Debug("Successfully got", zap.String("key", key.GetKey()), zap.ByteString("value", val.GetData()))
 	return val, nil
 }
 
@@ -87,7 +89,7 @@ func (s *Cache) Get(ctx context.Context, key *Key) (*Value, error) {
 func (s *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 	err := s.set(ctx, kv)
 	if err != nil {
-		log.P.Warn("failed to set", zap.Error(err))
+		s.Warn("failed to set", zap.Error(err))
 		return nil, err
 	}
 
@@ -114,9 +116,9 @@ func (s *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 
 				_, err := repl.Set(nctx, kv)
 				if err != nil {
-					log.P.Warn("unable to set updated key on replication", zap.String("repl", repl.RemoteAddr), zap.Error(err))
+					s.Warn("unable to set updated key on replication", zap.String("repl", repl.RemoteAddr), zap.Error(err))
 				} else {
-					log.P.Info("updated key on replication", zap.String("repl", repl.RemoteAddr), zap.String("key", kv.GetKey()))
+					s.Info("updated key on replication", zap.String("repl", repl.RemoteAddr), zap.String("key", kv.GetKey()))
 				}
 
 				// make sure context doesn't leak
@@ -136,9 +138,10 @@ func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 
 	ch, unsub := s.SubscribeChan(prefix.GetKey())
 	for kv := range ch {
+		s.Info("[subscribe] Sending key " + kv.GetKey())
 		err := stream.Send(kv)
 		if err != nil { // TODO should probably switch on the error
-			log.P.Warn("failed to send to stream", zap.Error(err), zap.String("key", kv.GetKey()))
+			s.Warn("failed to send key to stream", zap.Error(err), zap.String("key", kv.GetKey()))
 			unsub()
 			return err
 		}
@@ -150,20 +153,20 @@ func (s *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 // SubscribeChan .
 func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	ch := make(chan *KeyValue, 16)
-	log.P.Info("Subscribing to", zap.String("prefix", prefix))
+	s.Info("Subscribing to", zap.String("prefix", prefix))
 
 	go func() {
 		// get a dump of the cache, send that down the stream
 		kvs, err := s.store.GetPrefix([]byte(prefix))
 		if err != nil {
-			log.P.Warn("unable to get prefix dump", zap.String("prefix", prefix), zap.Error(err))
+			s.Warn("unable to get prefix dump", zap.String("prefix", prefix), zap.Error(err))
 			return
 		}
 
 		for i := range kvs {
 			var v Value
 			if err := proto.Unmarshal(kvs[i].Value, &v); err != nil {
-				log.P.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
+				s.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
 				continue
 			}
 
@@ -176,7 +179,7 @@ func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 	}()
 
 	unsubscribe := func() {
-		log.P.Info("Unsubscribing from", zap.String("prefix", prefix))
+		s.Info("Unsubscribing from", zap.String("prefix", prefix))
 		s.subsMu.Lock()
 		defer s.subsMu.Unlock()
 
@@ -202,6 +205,7 @@ func (s *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
 // ReplicateWith .
 func (s *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Empty, error) {
 	// TODO make the connection retry if it disconnects
+	// TODO a way to stop a replication?
 	conn, err := grpc.Dial(repl.GetRemoteAddr(), grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		return nil, fmt.Errorf("unable to open connection: %w", err)
@@ -210,8 +214,10 @@ func (s *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Em
 	r := &replication{
 		Replication:     repl,
 		LazaretteClient: NewLazaretteClient(conn),
-		Logger:          log.P.Named("repl-" + repl.GetRemoteAddr()),
+		Logger:          s.Named("repl-" + repl.GetRemoteAddr()),
 	}
+
+	r.Info("Started replication")
 
 	s.replsMu.Lock()
 	s.repls = append(s.repls, r)
@@ -252,7 +258,7 @@ func (s *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Em
 
 			err = s.set(ctx, kv)
 			if err != nil && !errors.Is(err, ErrNotNew) {
-				log.P.Warn("unable to set key", zap.Error(err))
+				s.Warn("unable to set key", zap.Error(err))
 			}
 		}
 	}()
@@ -273,13 +279,13 @@ func (s *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Em
 
 // Close .
 func (s *Cache) Close() error {
-	log.P.Info("Closing lazarette Cache")
+	s.Info("Closing lazarette Cache")
 	return s.store.Close()
 }
 
 // Clean .
 func (s *Cache) Clean() error {
-	log.P.Info("Cleaning lazarette Cache")
+	s.Info("Cleaning lazarette Cache")
 	return s.store.Clean()
 }
 
@@ -291,7 +297,7 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 		return errors.New("timestamp must not be nil")
 	}
 
-	log.P.Info("Setting", zap.String("key", kv.GetKey()), zap.ByteString("value", kv.GetData()))
+	s.Info("Setting", zap.String("key", kv.GetKey()), zap.ByteString("value", kv.GetData()))
 
 	// get the current val
 	cur, err := s.Get(ctx, &Key{Key: kv.GetKey()})
@@ -329,6 +335,6 @@ func (s *Cache) set(ctx context.Context, kv *KeyValue) error {
 		return fmt.Errorf("unable to put value into store: %w", err)
 	}
 
-	log.P.Debug("Successfully set", zap.String("key", kv.GetKey()))
+	s.Debug("Successfully set", zap.String("key", kv.GetKey()))
 	return nil
 }
