@@ -1,6 +1,7 @@
 package memstore
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/byuoitav/lazarette/store"
@@ -53,4 +54,25 @@ func (s *memstore) Clean() error {
 // Close .
 func (s *memstore) Close() error {
 	return nil
+}
+
+func (s *memstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
+	var kvs []store.KeyValue
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for key, value := range s.m {
+		if strings.HasPrefix(key, string(prefix)) {
+			v := make([]byte, len(value))
+			copy(v, value)
+
+			kvs = append(kvs, store.KeyValue{
+				Key:   []byte(key),
+				Value: v,
+			})
+		}
+	}
+
+	return kvs, nil
 }

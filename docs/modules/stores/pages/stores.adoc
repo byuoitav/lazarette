@@ -1,0 +1,16 @@
+= Stores
+
+Stores are the basic backing storage interface for Lazarette. When you create an instance of Lazarette, you must give it one of these stores to store data in.
+
+Each store has the following methods:
+[source,go]
+----
+type Store interface {
+	Get(key []byte) ([]byte, error)
+	GetPrefix(prefix []byte) ([]KeyValue, error)
+	Set(key, val []byte) error
+
+	Close() error
+	Clean() error
+}
+----

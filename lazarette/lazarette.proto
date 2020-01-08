@@ -9,6 +9,8 @@ service Lazarette {
 
     rpc Set (KeyValue) returns (google.protobuf.Empty) {}
     rpc Subscribe(Key) returns (stream KeyValue) {}
+
+    rpc ReplicateWith(Replication) returns (google.protobuf.Empty) {}
 }
 
 message Key {
@@ -21,6 +23,12 @@ message Value {
 }
 
 message KeyValue {
-    Key key = 1;
-    Value value = 2;
+    string key = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    bytes data = 3;
+}
+
+message Replication {
+    string RemoteAddr = 1;
+    string Prefix = 2;
 }

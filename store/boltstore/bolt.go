@@ -1,6 +1,7 @@
 package boltstore
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/byuoitav/lazarette/store"
@@ -82,4 +83,31 @@ func (s *boltstore) Set(key, val []byte) error {
 	})
 
 	return err
+}
+
+func (s *boltstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
+	var kvs []store.KeyValue
+
+	err := s.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(DefaultBucket)
+		if bucket == nil {
+			return fmt.Errorf("no %v bucket found", DefaultBucket)
+		}
+
+		return bucket.ForEach(func(key, value []byte) error {
+			if bytes.HasPrefix(key, prefix) {
+				v := make([]byte, len(value))
+				copy(v, value)
+
+				kvs = append(kvs, store.KeyValue{
+					Key:   key,
+					Value: v,
+				})
+			}
+
+			return nil
+		})
+	})
+
+	return kvs, err
 }

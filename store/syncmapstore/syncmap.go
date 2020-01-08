@@ -1,6 +1,7 @@
 package syncmapstore
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/byuoitav/lazarette/store"
@@ -44,7 +45,31 @@ func (s *syncmapstore) Clean() error {
 	return nil
 }
 
-// Close .
 func (s *syncmapstore) Close() error {
+	s.Map = nil
 	return nil
+}
+
+func (s *syncmapstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
+	var kvs []store.KeyValue
+
+	s.Map.Range(func(key, value interface{}) bool {
+		k := key.(string)
+
+		if strings.HasPrefix(k, string(prefix)) {
+			if buf, ok := value.([]byte); ok {
+				v := make([]byte, len(buf))
+				copy(v, buf)
+
+				kvs = append(kvs, store.KeyValue{
+					Key:   []byte(k),
+					Value: v,
+				})
+			}
+		}
+
+		return true
+	})
+
+	return kvs, nil
 }
