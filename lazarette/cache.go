@@ -54,7 +54,6 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 	}
 
 	var err error
-	err = nil
 
 	if c.interval > 0 {
 		c.kill = make(chan struct{})
