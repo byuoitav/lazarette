@@ -111,3 +111,28 @@ func (s *boltstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
 
 	return kvs, err
 }
+
+func (s *boltstore) Dump() ([]store.KeyValue, error) {
+	var kvs []store.KeyValue
+
+	err := s.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(DefaultBucket)
+		if bucket == nil {
+			return fmt.Errorf("no %v bucket found", DefaultBucket)
+		}
+
+		return bucket.ForEach(func(key, value []byte) error {
+			v := make([]byte, len(value))
+			copy(v, value)
+
+			kvs = append(kvs, store.KeyValue{
+				Key:   key,
+				Value: v,
+			})
+
+			return nil
+		})
+	})
+
+	return kvs, err
+}

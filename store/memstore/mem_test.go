@@ -26,6 +26,8 @@ func testEqual(tb testing.TB, expected, actual []byte) {
 }
 
 func TestSet(t *testing.T) {
+	t.Log("Testing Set")
+
 	store := newStore(t)
 	defer store.Close()
 
@@ -46,6 +48,8 @@ func TestSet(t *testing.T) {
 }
 
 func TestGetInvalidKey(t *testing.T) {
+	t.Log("Testing GetInvalidKey")
+
 	store := newStore(t)
 	defer store.Close()
 
@@ -61,6 +65,8 @@ func TestGetInvalidKey(t *testing.T) {
 }
 
 func TestClean(t *testing.T) {
+	t.Log("Testing Clean")
+
 	store := newStore(t)
 	defer store.Close()
 
@@ -87,6 +93,8 @@ func TestClean(t *testing.T) {
 }
 
 func TestGetPrefix(t *testing.T) {
+	t.Log("Testing GetPrefix")
+
 	store := newStore(t)
 	defer store.Close()
 
