@@ -73,3 +73,24 @@ func (s *syncmapstore) GetPrefix(prefix []byte) ([]store.KeyValue, error) {
 
 	return kvs, nil
 }
+
+func (s *syncmapstore) Dump() ([]store.KeyValue, error) {
+	var kvs []store.KeyValue
+
+	s.Map.Range(func(key, value interface{}) bool {
+		k := key.(string)
+		if buf, ok := value.([]byte); ok {
+			v := make([]byte, len(buf))
+			copy(v, buf)
+
+			kvs = append(kvs, store.KeyValue{
+				Key:   []byte(k),
+				Value: v,
+			})
+		}
+
+		return true
+	})
+
+	return kvs, nil
+}
