@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	// build the in memory store
+	// build the in-memory store
 	store, err := memstore.NewStore()
 	if err != nil {
 		log.P.Fatal("failed to create in memory store", zap.Error(err))
