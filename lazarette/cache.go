@@ -50,36 +50,39 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 		log:  options.logger,
 	}
 
-	var err error
-
 	if c.interval > 0 {
 		c.kill = make(chan struct{})
-		err = c.restore()
+
+		if err := c.restore(); err != nil {
+			return nil, err
+		}
+
 		go c.persist()
 	}
 
-	return c, err
+	return c, nil
 }
 
 // Close closes the cache
 func (c *Cache) Close() error {
 	c.log.Info("Closing lazarette Cache")
+
 	close(c.kill)
 	if c.interval > 0 {
 		if err := c.pStore.Close(); err != nil {
-			c.log.Warn("failed to close persistent store")
 			return err
 		}
 	}
+
 	return c.store.Close()
 }
 
 // Clean cleans the cache
 func (c *Cache) Clean() error {
 	c.log.Info("Cleaning lazarette Cache")
+
 	if c.interval > 0 {
 		if err := c.pStore.Clean(); err != nil {
-			c.log.Warn("failed to clean persistent store")
 			return err
 		}
 	}
@@ -90,55 +93,60 @@ func (c *Cache) Clean() error {
 func (c *Cache) persist() {
 	t := time.NewTicker(c.interval)
 	defer t.Stop()
+
 	for {
 		select {
 		case <-t.C:
-			c.log.Info("dumping cache")
+			c.log.Info("Backing up cache to persistant store")
+
 			kvs, err := c.store.Dump()
 			if err != nil {
 				c.log.Warn("failed to dump from memory store", zap.Error(err))
 				continue
 			}
+
 			if err = c.pStore.Clean(); err != nil {
 				c.log.Warn("failed to clear persistent store", zap.Error(err))
 				continue
 			}
+
 			for _, kv := range kvs {
 				if err = c.pStore.Set(kv.Key, kv.Value); err != nil {
-					c.log.Warn(fmt.Sprintf("failed to set %s - %s:", kv.Key, kv.Value), zap.Error(err))
+					c.log.Warn("unable to backup item", zap.ByteString("key", kv.Key), zap.Error(err))
 					continue
 				}
 			}
 		case <-c.kill:
 			return
 		}
-
 	}
 }
 
 func (c *Cache) restore() error {
-	c.log.Info("restoring from persistent storage")
+	c.log.Info("Restoring cache from persistent storage")
 
 	kvs, err := c.pStore.Dump()
 	if err != nil {
-		c.log.Warn("failed to dump from persistent store", zap.Error(err))
-		return err
+		return fmt.Errorf("unable to get persistant store dump: %w", err)
 	}
+
 	if err = c.store.Clean(); err != nil {
-		c.log.Warn("failed to clear memory store", zap.Error(err))
-		return err
+		return fmt.Errorf("unable to get clear store: %w", err)
 	}
+
 	errCount := 0
+
 	for _, kv := range kvs {
 		if err = c.store.Set(kv.Key, kv.Value); err != nil {
-			c.log.Warn(fmt.Sprintf("failed to set %s - %s:", kv.Key, kv.Value), zap.Error(err))
+			c.log.Warn("unable to restore item", zap.ByteString("key", kv.Key), zap.Error(err))
 			errCount++
 			continue
 		}
 	}
+
 	if errCount > 0 {
-		c.log.Warn(fmt.Sprintf("encountered %v errors setting key-value pairs", errCount))
-		return fmt.Errorf("encountered error(s) restoring data from persistent storage")
+		return fmt.Errorf("encountered %v error(s) restoring data from persistent storage", errCount)
 	}
+
 	return nil
 }

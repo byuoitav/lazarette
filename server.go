@@ -20,14 +20,18 @@ func main() {
 		log.P.Fatal("failed to create in memory store", zap.Error(err))
 	}
 
-	db, err := bolt.Open("/byu/backup.db", 0600, nil)
+	// build the permanant store
+	db, err := bolt.Open("/byu/lazarette.db", 0600, nil)
 	if err != nil {
 		log.P.Fatal("failed to open bolt", zap.Error(err))
 	}
+
 	pStore, err := boltstore.NewStore(db)
 	if err != nil {
 		log.P.Fatal("failed to create persistent store", zap.Error(err))
 	}
+
+	// TODO make interval configurable
 	// build the cache
 	laz, err := lazarette.New(store, lazarette.WithPersistent(pStore, 5*time.Minute))
 	if err != nil {
