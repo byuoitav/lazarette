@@ -68,6 +68,19 @@ func (c *Cache) Close() error {
 
 	close(c.kill)
 
+	// kill all of the subscriptions
+	c.subs.Range(func(key, value interface{}) bool {
+		subs := value.([]*Subscription)
+		for i := range subs {
+			subs[i].stop()
+		}
+
+		return true
+	})
+
+	// empty the subs map
+	c.subs = sync.Map{}
+
 	if c.interval > 0 {
 		if err := c.pStore.Close(); err != nil {
 			return err

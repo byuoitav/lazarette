@@ -21,9 +21,14 @@ func (c *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	}
 	defer s.Stop()
 
-	for kv := range s.Changes() {
-		if err := stream.Send(kv); err != nil { // TODO should probably switch on the error
-			return fmt.Errorf("unable to send %q to stream", kv.GetKey())
+	for {
+		select {
+		case <-s.Done():
+			break
+		case kv := <-s.Changes():
+			if err := stream.Send(kv); err != nil { // TODO should probably switch on the error
+				return fmt.Errorf("unable to send %q to stream", kv.GetKey())
+			}
 		}
 	}
 
@@ -87,12 +92,9 @@ func (s *Subscription) sendBulk(kvs []store.KeyValue) {
 	}
 }
 
-// TODO i don't think this works 100%
 func (s *Subscription) send(kv *KeyValue) {
 	select {
 	case <-s.kill:
-		return
-	case <-s.cache.kill:
 		return
 	default:
 		s.changes <- kv
@@ -101,6 +103,10 @@ func (s *Subscription) send(kv *KeyValue) {
 
 func (s *Subscription) Changes() chan *KeyValue {
 	return s.changes
+}
+
+func (s *Subscription) Done() chan struct{} {
+	return s.kill
 }
 
 func (s *Subscription) Stop() {
@@ -125,8 +131,11 @@ func (s *Subscription) Stop() {
 
 		// stop that goroutine's spawned by me
 		close(s.kill)
+	})
+}
 
-		// there are no more changes
-		close(s.changes)
+func (s *Subscription) stop() {
+	s.once.Do(func() {
+		close(s.kill)
 	})
 }
