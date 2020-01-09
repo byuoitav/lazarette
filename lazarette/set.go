@@ -29,7 +29,7 @@ func (c *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 
 			for i := range subs {
 				// TODO make sure this doesn't block
-				subs[i].kvs <- kv
+				subs[i].send(kv)
 			}
 		}
 
@@ -60,7 +60,7 @@ func (c *Cache) setFromReplication(ctx context.Context, kv *KeyValue, skip *Subs
 				}
 
 				// TODO make sure this doesn't block
-				subs[i].kvs <- kv
+				subs[i].send(kv)
 			}
 		}
 

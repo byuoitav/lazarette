@@ -27,6 +27,7 @@ type Cache struct {
 
 	log *zap.Logger
 
+	// stop all goroutines created by this cache
 	kill chan struct{}
 }
 
@@ -41,7 +42,9 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 	}
 
 	c := &Cache{
-		store:    store,
+		store: store,
+		kill:  make(chan struct{}),
+
 		pStore:   options.pStore,
 		interval: options.interval,
 
@@ -49,8 +52,6 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 	}
 
 	if c.interval > 0 {
-		c.kill = make(chan struct{})
-
 		if err := c.restore(); err != nil {
 			return nil, err
 		}
@@ -66,6 +67,7 @@ func (c *Cache) Close() error {
 	c.log.Info("Closing lazarette Cache")
 
 	close(c.kill)
+
 	if c.interval > 0 {
 		if err := c.pStore.Close(); err != nil {
 			return err
@@ -79,6 +81,8 @@ func (c *Cache) Close() error {
 func (c *Cache) Clean() error {
 	c.log.Info("Cleaning lazarette Cache")
 
+	// TODO do we want to clean? i don't think so
+	// bc it should just be a 5 minute backup, so it will get wiped in a little while
 	if c.interval > 0 {
 		if err := c.pStore.Clean(); err != nil {
 			return err
