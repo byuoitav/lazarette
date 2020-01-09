@@ -2,25 +2,34 @@ package main
 
 import (
 	"net"
+	"time"
 
 	"github.com/byuoitav/lazarette/lazarette"
 	"github.com/byuoitav/lazarette/log"
+	"github.com/byuoitav/lazarette/store/boltstore"
 	"github.com/byuoitav/lazarette/store/memstore"
+	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 func main() {
-	// build the in memory store
+	// build the in-memory store
 	store, err := memstore.NewStore()
 	if err != nil {
 		log.P.Fatal("failed to create in memory store", zap.Error(err))
 	}
 
-	// TODO build a persistant store
-
+	db, err := bolt.Open("/byu/backup.db", 0600, nil)
+	if err != nil {
+		log.P.Fatal("failed to open bolt", zap.Error(err))
+	}
+	pStore, err := boltstore.NewStore(db)
+	if err != nil {
+		log.P.Fatal("failed to create persistent store", zap.Error(err))
+	}
 	// build the cache
-	laz, err := lazarette.New(store)
+	laz, err := lazarette.New(store, lazarette.WithPersistent(pStore, 5*time.Minute))
 	if err != nil {
 		log.P.Fatal("failed to create cache", zap.Error(err))
 	}

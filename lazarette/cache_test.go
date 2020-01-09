@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/byuoitav/lazarette/log"
+	"github.com/byuoitav/lazarette/store/boltstore"
+	"github.com/byuoitav/lazarette/store/memstore"
 	"github.com/byuoitav/lazarette/store/syncmapstore"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
+	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +30,7 @@ func newSyncMapCache(tb testing.TB) *Cache {
 		tb.Fatalf("failed to create syncmap store: %v", err)
 	}
 
-	cache, err := NewCache(store)
+	cache, err := New(store)
 	if err != nil {
 		tb.Fatalf("failed to start cache: %v", err)
 	}
@@ -80,6 +83,14 @@ func randVal(tb testing.TB, maxLength int) *Value {
 	}
 }
 
+func randKV(tb testing.TB, maxLength int) *KeyValue {
+	return &KeyValue{
+		Key:       randKey(tb, maxLength),
+		Data:      randData(tb, maxLength),
+		Timestamp: ptypes.TimestampNow(),
+	}
+}
+
 func randData(tb testing.TB, maxLength int) []byte {
 	buf := make([]byte, seededRand.Intn(maxLength))
 	_, err := seededRand.Read(buf)
@@ -114,6 +125,7 @@ func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
 }
 
 func TestMain(m *testing.M) {
+
 	log.Config.Level.SetLevel(zap.PanicLevel)
 	os.Exit(m.Run())
 }
@@ -122,37 +134,48 @@ func TestMain(m *testing.M) {
 
 func doCacheTest(t *testing.T, cache *Cache) {
 	// testing it works
+	t.Log("SetAndGet")
 	t.Run("TestSetAndGet", SetAndGet(cache))
 	cleanCache(t, cache)
 
+	t.Log("SettingTheSameKey")
 	t.Run("TestSettingTheSameKey", SettingTheSameKey(cache))
 	cleanCache(t, cache)
 
 	// testing concurrency
+	t.Log("ConcurrentSettingTheSameKey32Routines/8Times")
 	t.Run("TestConcurrentSettingTheSameKey32Routines/8Times", ConcurrentSettingTheSameKey(cache, 32, 8))
 	cleanCache(t, cache)
 
+	t.Log("ConcurrentSettingTheSameKey64Routines/16Times")
 	t.Run("TestConcurrentSettingTheSameKey64Routines/16Times", ConcurrentSettingTheSameKey(cache, 64, 16))
 	cleanCache(t, cache)
 
+	t.Log("ConcurrentSettingTheSameKey128Routines/16Times")
 	t.Run("TestConcurrentSettingTheSameKey128Routines/16Times", ConcurrentSettingTheSameKey(cache, 128, 16))
 	cleanCache(t, cache)
 
+	t.Log("ConcurrentSettingTheSameKey32Routines/8Times")
 	t.Run("TestConcurrentSettingRandomKeys32Routines/8Times", ConcurrentSettingRandomKeys(cache, 32, 8))
 	cleanCache(t, cache)
 
+	t.Log("ConcurrentSettingTheSameKey64Routines/16Times")
 	t.Run("TestConcurrentSettingRandomKeys64Routines/16Times", ConcurrentSettingRandomKeys(cache, 64, 16))
 	cleanCache(t, cache)
 
+	t.Log("ConcurrentSettingTheSameKey128Routines/16Times")
 	t.Run("TestConcurrentSettingRandomKeys128Routines/16Times", ConcurrentSettingRandomKeys(cache, 128, 16))
 	cleanCache(t, cache)
 
+	t.Log("SubscriptionChanMatch")
 	t.Run("TestSubscriptionChanMatch", SubscriptionChanMatchTest(cache))
 	cleanCache(t, cache)
 
+	t.Log("SubscriptionChanNoMatch")
 	t.Run("TestSubscriptionChanNoMatch", SubscriptionChanNoMatchTest(cache))
 	cleanCache(t, cache)
 
+	t.Log("Unsubscribe")
 	t.Run("TestUnsubscribe", UnsubscribeTest(cache))
 	cleanCache(t, cache)
 
@@ -319,6 +342,149 @@ func UnsubscribeTest(cache *Cache) func(*testing.T) {
 			t.Fatalf("channel got a new value after unsubscribe")
 		}
 	}
+}
+
+func TestPersistentStorage(t *testing.T) {
+	store, err := memstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create in memory store: %v\n", err)
+	}
+
+	db, err := bolt.Open(os.TempDir()+"/test.db", 0600, nil)
+	if err != nil {
+		t.Fatalf("failed to open bolt: %v\n", err)
+	}
+
+	pStore, err := boltstore.NewStore(db)
+	if err != nil {
+		t.Fatalf("failed to create persistent store: %v\n", err)
+	}
+
+	// build the cache
+	cache, err := New(store, WithPersistent(pStore, 3*time.Second))
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	kv := randKV(t, 100)
+
+	_, err = cache.Set(context.Background(), kv)
+	if err != nil {
+		t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey(), err, kv.GetData())
+	}
+
+	//PAUSE TO DUMP
+	time.Sleep(4 * time.Second)
+
+	//Close the cache
+	if err = cache.Close(); err != nil {
+		t.Fatalf("failed to close cache")
+	}
+
+	nStore, err := memstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create in memory store the second time: %v\n", err)
+	}
+
+	nDB, err := bolt.Open(os.TempDir()+"/test.db", 0600, nil)
+	if err != nil {
+		t.Fatalf("failed to open bolt: %v\n", err)
+	}
+
+	nPStore, err := boltstore.NewStore(nDB)
+	if err != nil {
+		t.Fatalf("failed to create persistent store the second time: %v\n", err)
+	}
+
+	// build the cache again
+	nCache, err := New(nStore, WithPersistent(nPStore, 3*time.Second))
+	if err != nil {
+		t.Fatalf("failed to create cache the second time: %v", err)
+	}
+
+	nval, err := nCache.Get(context.Background(), &Key{Key: kv.GetKey()})
+	if err != nil {
+		t.Fatalf("failed to get %q: %v", kv.GetKey(), err)
+	}
+
+	checkValueEqual(t, kv.GetKey(), &Value{Data: kv.GetData(), Timestamp: kv.GetTimestamp()}, nval)
+
+	if err = nCache.Close(); err != nil {
+		t.Fatalf("failed to close nCache")
+	}
+}
+
+func TestPersistentStorageFail(t *testing.T) {
+	store, err := memstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create in memory store: %v\n", err)
+	}
+
+	db, err := bolt.Open(os.TempDir()+"/test.db", 0600, nil)
+	if err != nil {
+		t.Fatalf("failed to open bolt: %v\n", err)
+	}
+
+	pStore, err := boltstore.NewStore(db)
+	if err != nil {
+		t.Fatalf("failed to create persistent store: %v\n", err)
+	}
+
+	// build the cache
+	cache, err := New(store, WithPersistent(pStore, 5*time.Second))
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	kv := randKV(t, 100)
+
+	_, err = cache.Set(context.Background(), kv)
+	if err != nil {
+		t.Fatalf("failed to set %q: %v. buf was 0x%x", kv.GetKey(), err, kv.GetData())
+	}
+
+	//PAUSE TO DUMP
+	time.Sleep(1 * time.Second)
+
+	//Close the cache
+	if err = cache.Close(); err != nil {
+		t.Fatalf("failed to close cache")
+	}
+
+	nStore, err := memstore.NewStore()
+	if err != nil {
+		t.Fatalf("failed to create in memory store the second time: %v\n", err)
+	}
+
+	nDB, err := bolt.Open(os.TempDir()+"/test.db", 0600, nil)
+	if err != nil {
+		t.Fatalf("failed to open bolt: %v\n", err)
+	}
+
+	nPStore, err := boltstore.NewStore(nDB)
+	if err != nil {
+		t.Fatalf("failed to create persistent store the second time: %v\n", err)
+	}
+
+	// build the cache again
+	nCache, err := New(nStore, WithPersistent(nPStore, 3*time.Second))
+	if err != nil {
+		t.Fatalf("failed to create cache the second time: %v", err)
+	}
+
+	_, err = nCache.Get(context.Background(), &Key{Key: kv.GetKey()})
+	if err != nil {
+		if !errors.Is(err, ErrKeyNotFound) {
+			t.Fatalf("error should be ErrKeyNotFound: %v", err)
+		}
+	} else {
+		t.Fatal("error should not be nil")
+	}
+
+	if err = nCache.Close(); err != nil {
+		t.Fatalf("failed to close nCache")
+	}
+
 }
 
 /* BENCHMARKS */
