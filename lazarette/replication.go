@@ -5,92 +5,93 @@ import (
 	"errors"
 	fmt "fmt"
 	"io"
+	"sync"
 
-	empty "github.com/golang/protobuf/ptypes/empty"
 	"go.uber.org/zap"
 	grpc "google.golang.org/grpc"
 )
 
-type replication struct {
-	*Replication
-	LazaretteClient
-	*zap.Logger
-}
-
-// UnsubscribeFunc .
-type UnsubscribeFunc func()
-
-// ReplicateWith .
-func (c *Cache) ReplicateWith(ctx context.Context, repl *Replication) (*empty.Empty, error) {
+func (c *Cache) Replicate(ctx context.Context, prefix, addr string) error {
 	// TODO make the connection retry if it disconnects
-	// TODO a way to stop a replication?
-	conn, err := grpc.Dial(repl.GetRemoteAddr(), grpc.WithInsecure(), grpc.WithBlock())
+
+	// connect to remote cache
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		return nil, fmt.Errorf("unable to open connection: %w", err)
+		return fmt.Errorf("unable to connect to remote lazarette: %w", err)
 	}
+	defer conn.Close()
 
-	r := &replication{
-		Replication:     repl,
-		LazaretteClient: NewLazaretteClient(conn),
-		Logger:          c.log.Named("repl-" + repl.GetRemoteAddr()),
-	}
+	remote := NewLazaretteClient(conn)
+	rlog := c.log.Named(fmt.Sprintf("%s-repl", addr))
 
-	r.Info("Started replication")
-
-	c.replsMu.Lock()
-	c.repls = append(c.repls, r)
-	c.replsMu.Unlock()
-
-	defer func() {
-		c.replsMu.Lock()
-		defer c.replsMu.Unlock()
-
-		// TODO remove from the repls list
-		conn.Close()
-	}()
-
-	// get all changes from the remote address
-	prefix := &Key{
-		Key: repl.GetPrefix(),
-	}
-
-	stream, err := r.Subscribe(ctx, prefix)
+	// get all changes from remote cache
+	rChanges, err := remote.Subscribe(ctx, &Key{Key: prefix})
 	if err != nil {
-		return nil, fmt.Errorf("unable to subscribe: %w", err)
+		return fmt.Errorf("unable to subscribe to remote lazarette: %w", err)
 	}
 
+	rlog.Info("Replicating prefix", zap.String("prefix", prefix))
+
+	// start read/write routines
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	kill := make(chan struct{})
+
+	// get changes coming from remote
 	go func() {
+		defer wg.Done()
+
 		for {
-			kv, err := stream.Recv()
-			switch {
-			case kv == nil:
-				continue
-			case err == io.EOF:
-				break
-			case err != nil:
-				// TODO handle error
-				// return fmt.Errorf("unable to recv message from stream: %w", err)
-			}
+			select {
+			case <-ctx.Done():
+				fallthrough
+			case <-kill:
+				return
+			default:
+				kv, err := rChanges.Recv()
+				switch {
+				case err == io.EOF:
+					return
+				case err != nil:
+					rlog.Warn("something went wrong receiving change from remote", zap.Error(err))
+				case kv == nil:
+					continue
+				}
 
-			r.Info("Received value", zap.String("key", kv.GetKey()))
-
-			err = c.set(ctx, kv)
-			if err != nil && !errors.Is(err, ErrNotNew) {
-				c.log.Warn("unable to set key", zap.Error(err))
+				if err := c.set(ctx, kv); err != nil && !errors.Is(err, ErrNotNew) {
+					rlog.Warn("unable to set key on local cache", zap.Error(err))
+				}
 			}
 		}
 	}()
 
-	// send all of our changes (and current state) to the remote address
-	changes, unsub := c.SubscribeChan(r.GetPrefix())
-	defer unsub()
+	// send my changes to remote
+	go func() {
+		defer wg.Done()
 
-	for change := range changes {
-		_, err := r.Set(ctx, change)
-		if err != nil {
-			r.Warn("unable to update remote lazarette", zap.String("key", change.GetKey()))
+		// subscribe to my changes
+		lChanges, unsub := c.SubscribeChan(prefix)
+		defer unsub()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case change, ok := <-lChanges:
+				if !ok {
+					// time to stop
+					rlog.Info("Stopping replication")
+					return
+				}
+
+				if _, err := remote.Set(ctx, change); err != nil {
+					rlog.Warn("unable to set key on remote cache", zap.Error(err))
+				}
+			}
 		}
-	}
+	}()
 
-	return &empty.Empty{}, nil
+	wg.Wait()
+	return nil
 }

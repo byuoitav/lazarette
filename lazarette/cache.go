@@ -20,9 +20,6 @@ type Cache struct {
 	subsMu sync.RWMutex
 	subs   map[string][]chan *KeyValue
 
-	replsMu sync.RWMutex
-	repls   []*replication
-
 	log *zap.Logger
 }
 
