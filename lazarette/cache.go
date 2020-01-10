@@ -72,7 +72,7 @@ func (c *Cache) Close() error {
 	c.subs.Range(func(key, value interface{}) bool {
 		subs := value.([]*Subscription)
 		for i := range subs {
-			subs[i].stop()
+			subs[i].Stop()
 		}
 
 		return true

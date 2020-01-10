@@ -62,7 +62,7 @@ func (c *Cache) NewSubscription(prefix string) (*Subscription, error) {
 	// add this subscription to my subs map
 	buddies, ok := c.subs.Load(s.prefix)
 	if !ok {
-		buddies = make([]*Subscription, 1)
+		buddies = make([]*Subscription, 0)
 	}
 
 	buds := buddies.([]*Subscription)
@@ -79,7 +79,7 @@ func (s *Subscription) sendBulk(kvs []store.KeyValue) {
 	for i := range kvs {
 		var v Value
 		if err := proto.Unmarshal(kvs[i].Value, &v); err != nil {
-			s.cache.log.Warn("unable to unmarshal value", zap.ByteString("key", curKvs[i].Key), zap.Error(err))
+			s.cache.log.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
 			continue
 		}
 
@@ -125,17 +125,15 @@ func (s *Subscription) Stop() {
 				newBuds = append(newBuds, buds[i])
 			}
 
-			// put back all of my friends
-			s.cache.subs.Store(s.prefix, newBuds)
+			if len(newBuds) > 0 {
+				// put back all of my friends
+				s.cache.subs.Store(s.prefix, newBuds)
+			} else {
+				s.cache.subs.Delete(s.prefix)
+			}
 		}
 
 		// stop that goroutine's spawned by me
-		close(s.kill)
-	})
-}
-
-func (s *Subscription) stop() {
-	s.once.Do(func() {
 		close(s.kill)
 	})
 }

@@ -34,7 +34,7 @@ func TestPersistentStorage(t *testing.T) {
 		t.Fatalf("failed to create cache: %v", err)
 	}
 
-	kv := randKV(t, 100)
+	kv := randKV(t, 50, 300)
 
 	_, err = cache.Set(context.Background(), kv)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestPersistentStorageFail(t *testing.T) {
 		t.Fatalf("failed to create cache: %v", err)
 	}
 
-	kv := randKV(t, 100)
+	kv := randKV(t, 50, 300)
 
 	_, err = cache.Set(context.Background(), kv)
 	if err != nil {

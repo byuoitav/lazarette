@@ -26,7 +26,6 @@ func (c *Cache) Set(ctx context.Context, kv *KeyValue) (*empty.Empty, error) {
 		if strings.HasPrefix(kv.GetKey(), prefix) {
 			// send it to all of these subscribers
 			subs := value.([]*Subscription)
-
 			for i := range subs {
 				// TODO make sure this doesn't block
 				subs[i].send(kv)
