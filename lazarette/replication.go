@@ -14,11 +14,12 @@ import (
 // TODO there will be a loop if a remote cache replicates a local one,
 // and the local one is also replicating the remote one
 
+// TODO should this return a struct that you could stop the replication with?
 func (c *Cache) Replicate(ctx context.Context, prefix, addr string) error {
 	// TODO make the connection retry if it disconnects
 
 	// connect to remote cache
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		return fmt.Errorf("unable to connect to remote lazarette: %w", err)
 	}
