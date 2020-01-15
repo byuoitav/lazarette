@@ -2,80 +2,136 @@ package lazarette
 
 import (
 	"errors"
+	fmt "fmt"
+	"sync"
 
+	"github.com/byuoitav/lazarette/store"
 	proto "github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 )
-
-type UnsubscribeFunc func()
 
 func (c *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	if prefix == nil {
 		return errors.New("prefix must not be nil")
 	}
 
-	ch, unsub := c.SubscribeChan(prefix.GetKey())
-	for kv := range ch {
-		c.log.Info("[subscribe] Sending key " + kv.GetKey())
-		err := stream.Send(kv)
-		if err != nil { // TODO should probably switch on the error
-			c.log.Warn("failed to send key to stream", zap.Error(err), zap.String("key", kv.GetKey()))
-			unsub()
-			return err
+	s, err := c.NewSubscription(prefix.GetKey())
+	if err != nil {
+		return fmt.Errorf("unable to create subscription: %w", err)
+	}
+	defer s.Stop()
+
+	for {
+		select {
+		case <-s.Done():
+			return nil
+		case kv := <-s.Changes():
+			if err := stream.Send(kv); err != nil { // TODO should probably switch on the error
+				return fmt.Errorf("unable to send %q to stream", kv.GetKey())
+			}
 		}
 	}
-
-	return nil
 }
 
-// SubscribeChan .
-func (c *Cache) SubscribeChan(prefix string) (chan *KeyValue, UnsubscribeFunc) {
-	ch := make(chan *KeyValue, 16)
-	c.log.Info("Subscribing to", zap.String("prefix", prefix))
+type Subscription struct {
+	cache *Cache
 
-	go func() {
-		// get a dump of the cache, send that down the stream
-		kvs, err := c.store.GetPrefix([]byte(prefix))
-		if err != nil {
-			c.log.Warn("unable to get prefix dump", zap.String("prefix", prefix), zap.Error(err))
-			return
-		}
+	prefix  string
+	changes chan *KeyValue
+	once    sync.Once
+	kill    chan struct{}
+}
 
-		for i := range kvs {
-			var v Value
-			if err := proto.Unmarshal(kvs[i].Value, &v); err != nil {
-				c.log.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
-				continue
-			}
+func (c *Cache) NewSubscription(prefix string) (*Subscription, error) {
+	c.log.Info("Creating new subscription", zap.String("prefix", prefix))
 
-			ch <- &KeyValue{
-				Key:       string(kvs[i].Key),
-				Timestamp: v.GetTimestamp(),
-				Data:      v.GetData(),
-			}
-		}
-	}()
-
-	unsubscribe := func() {
-		c.log.Info("Unsubscribing from", zap.String("prefix", prefix))
-		c.subsMu.Lock()
-		defer c.subsMu.Unlock()
-
-		if chs, ok := c.subs[prefix]; ok {
-			c.subs[prefix] = nil
-			for i := range chs {
-				if ch != chs[i] {
-					c.subs[prefix] = append(c.subs[prefix], chs[i])
-				}
-			}
-		}
-
-		close(ch)
+	s := &Subscription{
+		cache:   c,
+		prefix:  prefix,
+		changes: make(chan *KeyValue, 1),
+		kill:    make(chan struct{}),
 	}
 
-	c.subsMu.Lock()
-	c.subs[prefix] = append(c.subs[prefix], ch)
-	c.subsMu.Unlock()
+	curKvs, err := c.store.GetPrefix([]byte(s.prefix))
+	if err != nil {
+		return nil, fmt.Errorf("unable to dump keys matching given prefix: %w", err)
+	}
 
-	return ch, unsubscribe
+	// add this subscription to my subs map
+	buddies, ok := c.subs.Load(s.prefix)
+	if !ok {
+		buddies = make([]*Subscription, 0)
+	}
+
+	buds := buddies.([]*Subscription)
+	buds = append(buds, s)
+	c.subs.Store(s.prefix, buds)
+
+	// send all current keys to subscriber
+	go s.sendBulk(curKvs)
+
+	return s, nil
+}
+
+func (s *Subscription) sendBulk(kvs []store.KeyValue) {
+	for i := range kvs {
+		var v Value
+		if err := proto.Unmarshal(kvs[i].Value, &v); err != nil {
+			s.cache.log.Warn("unable to unmarshal value", zap.ByteString("key", kvs[i].Key), zap.Error(err))
+			continue
+		}
+
+		// send value to subscriber
+		s.send(&KeyValue{
+			Key:       string(kvs[i].Key),
+			Timestamp: v.GetTimestamp(),
+			Data:      v.GetData(),
+		})
+	}
+}
+
+func (s *Subscription) send(kv *KeyValue) {
+	select {
+	case <-s.kill:
+		return
+	default:
+		s.changes <- kv
+	}
+}
+
+func (s *Subscription) Changes() chan *KeyValue {
+	return s.changes
+}
+
+func (s *Subscription) Done() chan struct{} {
+	return s.kill
+}
+
+func (s *Subscription) Stop() {
+	s.once.Do(func() {
+		buddies, ok := s.cache.subs.Load(s.prefix)
+		if ok {
+			buds := buddies.([]*Subscription)
+
+			// remove myself from the slice
+			var newBuds []*Subscription
+			for i := range buds {
+				if s == buds[i] {
+					continue
+				}
+
+				newBuds = append(newBuds, buds[i])
+			}
+
+			if len(newBuds) > 0 {
+				// put back all of my friends
+				s.cache.subs.Store(s.prefix, newBuds)
+			} else {
+				s.cache.subs.Delete(s.prefix)
+			}
+		}
+
+		// stop that goroutine's spawned by me
+		close(s.kill)
+	})
 }

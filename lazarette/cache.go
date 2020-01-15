@@ -2,7 +2,6 @@ package lazarette
 
 import (
 	"errors"
-	fmt "fmt"
 	"sync"
 	"time"
 
@@ -18,16 +17,17 @@ var ErrNotNew = errors.New("a newer value was found; not setting")
 
 // Cache .
 type Cache struct {
-	store  store.Store
-	pStore store.Store
+	store store.Store
 
+	pStore   store.Store
 	interval time.Duration
 
-	subsMu sync.RWMutex
-	subs   map[string][]chan *KeyValue
+	// map of [prefix][]*Subscription
+	subs sync.Map
 
 	log *zap.Logger
 
+	// stop all goroutines created by this cache
 	kill chan struct{}
 }
 
@@ -42,103 +42,65 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 	}
 
 	c := &Cache{
-		store:    store,
+		store: store,
+		kill:  make(chan struct{}),
+
 		pStore:   options.pStore,
 		interval: options.interval,
 
-		subs: make(map[string][]chan *KeyValue),
-		log:  options.logger,
+		log: options.logger,
 	}
 
-	var err error
-
 	if c.interval > 0 {
-		c.kill = make(chan struct{})
-		err = c.restore()
+		if err := c.restore(); err != nil {
+			return nil, err
+		}
+
 		go c.persist()
 	}
 
-	return c, err
+	return c, nil
 }
 
 // Close closes the cache
 func (c *Cache) Close() error {
 	c.log.Info("Closing lazarette Cache")
+
 	close(c.kill)
+
+	// kill all of the subscriptions
+	c.subs.Range(func(key, value interface{}) bool {
+		subs := value.([]*Subscription)
+		for i := range subs {
+			subs[i].Stop()
+		}
+
+		return true
+	})
+
+	// empty the subs map
+	c.subs = sync.Map{}
+
 	if c.interval > 0 {
 		if err := c.pStore.Close(); err != nil {
-			c.log.Warn("failed to close persistent store")
 			return err
 		}
 	}
+
 	return c.store.Close()
 }
 
 // Clean cleans the cache
 func (c *Cache) Clean() error {
 	c.log.Info("Cleaning lazarette Cache")
+
+	// TODO do we want to clean? i don't think so
+	// bc it should just be a 5 minute backup, so it will get wiped in a little while
 	if c.interval > 0 {
 		if err := c.pStore.Clean(); err != nil {
-			c.log.Warn("failed to clean persistent store")
 			return err
 		}
 	}
 
 	return c.store.Clean()
-}
-
-func (c *Cache) persist() {
-	t := time.NewTicker(c.interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			c.log.Info("dumping cache")
-			kvs, err := c.store.Dump()
-			if err != nil {
-				c.log.Warn("failed to dump from memory store", zap.Error(err))
-				continue
-			}
-			if err = c.pStore.Clean(); err != nil {
-				c.log.Warn("failed to clear persistent store", zap.Error(err))
-				continue
-			}
-			for _, kv := range kvs {
-				if err = c.pStore.Set(kv.Key, kv.Value); err != nil {
-					c.log.Warn(fmt.Sprintf("failed to set %s - %s:", kv.Key, kv.Value), zap.Error(err))
-					continue
-				}
-			}
-		case <-c.kill:
-			return
-		}
-
-	}
-}
-
-func (c *Cache) restore() error {
-	c.log.Info("restoring from persistent storage")
-
-	kvs, err := c.pStore.Dump()
-	if err != nil {
-		c.log.Warn("failed to dump from persistent store", zap.Error(err))
-		return err
-	}
-	if err = c.store.Clean(); err != nil {
-		c.log.Warn("failed to clear memory store", zap.Error(err))
-		return err
-	}
-	errCount := 0
-	for _, kv := range kvs {
-		if err = c.store.Set(kv.Key, kv.Value); err != nil {
-			c.log.Warn(fmt.Sprintf("failed to set %s - %s:", kv.Key, kv.Value), zap.Error(err))
-			errCount++
-			continue
-		}
-	}
-	if errCount > 0 {
-		c.log.Warn(fmt.Sprintf("encountered %v errors setting key-value pairs", errCount))
-		return fmt.Errorf("encountered error(s) restoring data from persistent storage")
-	}
-	return nil
 }
