@@ -24,15 +24,13 @@ func (c *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	for {
 		select {
 		case <-s.Done():
-			break
+			return nil
 		case kv := <-s.Changes():
 			if err := stream.Send(kv); err != nil { // TODO should probably switch on the error
 				return fmt.Errorf("unable to send %q to stream", kv.GetKey())
 			}
 		}
 	}
-
-	return nil
 }
 
 type Subscription struct {
