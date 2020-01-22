@@ -67,8 +67,9 @@ func New(store store.Store, opts ...Option) (*Cache, error) {
 // Close closes the cache
 func (c *Cache) Close() error {
 	c.log.Info("Closing lazarette Cache")
-	close(c.kill)
 	if c.interval > 0 {
+		c.log.Info("Closing persistent store")
+		close(c.kill)
 		if err := c.pStore.Close(); err != nil {
 			c.log.Warn("failed to close persistent store")
 			return err
@@ -81,6 +82,7 @@ func (c *Cache) Close() error {
 func (c *Cache) Clean() error {
 	c.log.Info("Cleaning lazarette Cache")
 	if c.interval > 0 {
+		c.log.Info("Cleaning persistent store")
 		if err := c.pStore.Clean(); err != nil {
 			c.log.Warn("failed to clean persistent store")
 			return err

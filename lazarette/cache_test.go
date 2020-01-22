@@ -125,8 +125,7 @@ func setAndCheck(tb testing.TB, cache *Cache, kv *KeyValue) {
 }
 
 func TestMain(m *testing.M) {
-
-	log.Config.Level.SetLevel(zap.PanicLevel)
+	log.Config.Level.SetLevel(zap.InfoLevel)
 	os.Exit(m.Run())
 }
 
