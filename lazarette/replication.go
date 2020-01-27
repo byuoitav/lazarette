@@ -15,6 +15,8 @@ import (
 // and the local one is also replicating the remote one
 
 // TODO should this return a struct that you could stop the replication with?
+
+// Replicate .
 func (c *Cache) Replicate(ctx context.Context, prefix, addr string) error {
 	// TODO make the connection retry if it disconnects
 

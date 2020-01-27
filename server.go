@@ -21,7 +21,7 @@ func main() {
 	}
 
 	// build the permanant store
-	db, err := bolt.Open("/byu/lazarette.db", 0600, nil)
+	db, err := bolt.Open("/tmp/lazarette.db", 0600, nil)
 	if err != nil {
 		log.P.Fatal("failed to open bolt", zap.Error(err))
 	}
@@ -45,6 +45,7 @@ func main() {
 	}
 
 	// create grpc server
+	//TODO see if this actually fixes lazarette
 	server := grpc.NewServer()
 	lazarette.RegisterLazaretteServer(server, laz)
 

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Subscribe .
 func (c *Cache) Subscribe(prefix *Key, stream Lazarette_SubscribeServer) error {
 	if prefix == nil {
 		return errors.New("prefix must not be nil")
