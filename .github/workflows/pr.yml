@@ -21,4 +21,16 @@ jobs:
         uses: actions/checkout@v1
 
       - name: Build
-        run: make
+        run: |
+            mkdir --parents $(go env GOPATH)/bin/
+            export PATH=$PATH:$(go env GOPATH)/bin # temp fix, https://github.com/actions/setup-go/issues/14
+
+            # install protoc
+            export PROTOC_VERSION=3.9.2
+            export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip
+            curl -fLO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"
+            unzip ${PROTOC_ZIP}
+            mv bin/protoc $(go env GOPATH)/bin/
+            mv include/* ./lazarette/
+
+            make
