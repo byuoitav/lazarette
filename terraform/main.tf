@@ -21,22 +21,28 @@ provider "kubernetes" {
   host = data.aws_ssm_parameter.eks_cluster_endpoint.value
 }
 
-// pull all env vars out of ssm
-module "deployment" {
-  source = "github.com/byuoitav/terraform//modules/kubernetes-deployment"
+module "statefulset_dev" {
+  source = "github.com/byuoitav/terraform//modules/kubernetes-statefulset"
 
   // required
-  name           = "lazarette-dev"
-  image          = "docker.pkg.github.com/byuoitav/lazarette/lazarette"
-  image_version  = "v0.1.0"
-  container_port = 7777
-  repo_url       = "https://github.com/byuoitav/lazarette"
+  name               = "lazarette-dev"
+  image              = "docker.pkg.github.com/byuoitav/lazarette/lazarette"
+  image_version      = "v0.2.0"
+  container_port     = 8080
+  repo_url           = "https://github.com/byuoitav/lazarette"
+  storage_mount_path = "/lazarette"
+  storage_size       = "25Gi"
 
   // optional
   image_pull_secret = "github-docker-registry"
   public_urls       = ["lazarette-dev.av.byu.edu"]
   container_env     = {}
-  container_args    = []
+  container_args = [
+    "--port", "8080",
+    "--log-level", "2",
+    "--persist-path", "/lazarette/backup.db",
+    "--persist-interval", "1m"
+  ]
 }
 
 // TODO prod

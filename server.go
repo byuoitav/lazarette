@@ -70,6 +70,7 @@ func main() {
 	if len(persistPath) > 0 {
 		log.P.Info("Persisting cache to " + persistPath)
 
+		// TODO add logic to just get a persist directory, and add the database's ourselves
 		// build the permanant store
 		db, err := bolt.Open(persistPath, 0600, nil)
 		if err != nil {
