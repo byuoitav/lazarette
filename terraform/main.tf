@@ -25,13 +25,13 @@ module "statefulset_dev" {
   source = "github.com/byuoitav/terraform//modules/kubernetes-statefulset"
 
   // required
-  name               = "lazarette-dev"
-  image              = "docker.pkg.github.com/byuoitav/lazarette/lazarette"
-  image_version      = "v0.2.0"
-  container_port     = 8080
-  repo_url           = "https://github.com/byuoitav/lazarette"
-  storage_mount_path = "/lazarette"
-  storage_size       = "25Gi"
+  name                 = "lazarette-dev"
+  image                = "docker.pkg.github.com/byuoitav/lazarette/lazarette"
+  image_version        = "v0.2.0"
+  container_port       = 8080
+  repo_url             = "https://github.com/byuoitav/lazarette"
+  storage_mount_path   = "/opt/lazarette"
+  storage_request_size = "25Gi"
 
   // optional
   image_pull_secret = "github-docker-registry"
@@ -40,7 +40,7 @@ module "statefulset_dev" {
   container_args = [
     "--port", "8080",
     "--log-level", "2",
-    "--persist-path", "/lazarette/backup.db",
+    "--persist-path", "/opt/lazarette/backup.db",
     "--persist-interval", "1m"
   ]
 }
