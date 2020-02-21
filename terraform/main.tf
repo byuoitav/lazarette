@@ -43,6 +43,9 @@ module "statefulset_dev" {
     "--persist-path", "/opt/lazarette/backup.db",
     "--persist-interval", "1m"
   ]
+  ingress_annotations = {
+    "nginx.ingress.kubernetes.io/backend-protocol" = "GRPC"
+  }
 }
 
 // TODO prod
