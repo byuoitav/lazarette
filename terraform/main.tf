@@ -45,6 +45,9 @@ module "statefulset_dev" {
   ]
   ingress_annotations = {
     "nginx.ingress.kubernetes.io/backend-protocol" = "GRPC"
+    "nginx.ingress.kubernetes.io/server-snippet"   = <<EOF
+		grpc_read_timeout 7200s;
+		EOF
   }
 }
 
